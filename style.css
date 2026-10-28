@@ -1,0 +1,133 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: #ece9e2;
+  font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  color: #333;
+  overflow: hidden;
+}
+
+#hud {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 14px;
+  user-select: none;
+}
+
+#hud-left, #hud-right { display: flex; align-items: center; gap: 12px; }
+
+#week-bar {
+  width: 120px; height: 6px;
+  background: #d6d2c8; border-radius: 3px; overflow: hidden;
+}
+#week-bar-fill { height: 100%; width: 0%; background: #457b9d; }
+
+#hud-delivered { font-weight: 700; }
+
+#hud-colors { display: flex; align-items: center; gap: 8px; }
+.cpair { display: flex; align-items: center; gap: 3px; font-size: 12px; color: #6b6560; }
+.cdot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+
+#hud button {
+  border: none; background: #d6d2c8; color: #333;
+  padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 13px;
+}
+#hud button:hover { background: #c9c4b8; }
+#hud button.on { background: #457b9d; color: #fff; }
+
+#canvas-wrap {
+  display: flex; justify-content: center;
+  padding: 8px;
+  position: relative;
+}
+
+/* anchors the canvas overlay bars to the canvas itself, not the window */
+#canvas-inner { position: relative; display: inline-block; }
+
+#subbar {
+  position: absolute;
+  top: 16px; left: 16px;
+  display: flex; gap: 6px;
+  padding: 6px;
+  background: #f5f2ec;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+  user-select: none;
+}
+#subbar.hidden { display: none; }
+
+.hot.sub { width: 40px; height: 40px; border-radius: 9px; }
+
+#hotbar {
+  position: absolute;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 10px;
+  padding: 8px;
+  background: #f5f2ec;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+  user-select: none;
+}
+
+.hot {
+  position: relative;
+  width: 54px; height: 54px;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #d6d2c8; border-radius: 11px;
+  background: #ece9e2; cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.hot:hover { border-color: #b5afa3; background: #e5e1d8; }
+.hot.on { border-color: #457b9d; background: #e3ecf1; }
+
+.hot-badge {
+  position: absolute; top: -8px; right: -8px;
+  min-width: 21px; height: 21px; padding: 0 5px;
+  border-radius: 11px;
+  background: #457b9d; color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 21px; text-align: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+#game {
+  display: block;
+  background: #f5f2ec;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  cursor: crosshair;
+}
+
+#modal, #gameover {
+  position: fixed; inset: 0;
+  background: rgba(40,40,40,0.35);
+  display: flex; align-items: center; justify-content: center;
+}
+#modal.hidden, #gameover.hidden { display: none; }
+
+#modal-card, #gameover-card {
+  background: #f5f2ec; border-radius: 12px;
+  padding: 28px 32px; min-width: 320px;
+  box-shadow: 0 6px 30px rgba(0,0,0,0.25);
+  text-align: center;
+}
+#modal-card h2, #gameover-card h2 { margin-bottom: 18px; font-weight: 600; }
+
+#modal-options { display: flex; flex-direction: column; gap: 10px; }
+#modal-options button {
+  padding: 12px 18px; font-size: 15px;
+  border: 2px solid #457b9d; background: transparent; color: #2a4a5e;
+  border-radius: 8px; cursor: pointer;
+}
+#modal-options button:hover { background: #457b9d; color: #fff; }
+
+#gameover-card button {
+  margin-top: 14px; padding: 10px 22px; font-size: 15px;
+  border: none; background: #e63946; color: #fff;
+  border-radius: 8px; cursor: pointer;
+}
+#gameover-card button:hover { background: #c1121f; }
