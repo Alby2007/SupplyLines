@@ -86,12 +86,25 @@ export function roadNodeForBuilding(state, b) {
   return n;
 }
 
-// nearest existing edge to a point: {edge, t, x, y, d} or null
-export function nearestEdgePoint(state, p) {
+// nearest existing edge to a point: {edge, t, x, y, d} or null — scans only
+// edges whose cells fall within `radius` of p, so pointermove drafts stay O(1)
+let nepMark = 0;
+export function nearestEdgePoint(state, p, radius = CONFIG.roads.snap) {
+  const idx = roadCellIndex(state);
+  const c = cellOf(p);
+  const n = Math.ceil(radius / CONFIG.grid.cell);
+  const mark = ++nepMark;
   let best = null;
-  for (const e of state.roadEdges.values()) {
-    const np = nearestOnPolyline(e.pts, p);
-    if (!best || np.d < best.d) best = { edge: e, ...np };
+  for (let dx = -n; dx <= n; dx++) {
+    for (let dy = -n; dy <= n; dy++) {
+      for (const ref of idx.get(cellKey({ cx: c.cx + dx, cy: c.cy + dy })) ?? []) {
+        const e = state.roadEdges.get(ref.edgeId);
+        if (!e || e._nep === mark) continue; // an edge covers many cells
+        e._nep = mark;
+        const np = nearestOnPolyline(e.pts, p);
+        if (!best || np.d < best.d) best = { edge: e, ...np };
+      }
+    }
   }
   return best;
 }
@@ -178,8 +191,17 @@ export function splitEdgeMulti(state, e, ts) {
   removeRoadEdge(state, e);
   const newEdges = [];
   for (let i = 0; i < chunks.length; i++) {
-    if (chunks[i].length >= 2 && nodeIds[i] !== nodeIds[i + 1]) {
+    if (nodeIds[i] === nodeIds[i + 1]) continue;
+    if (chunks[i].length >= 2 && polyLen(chunks[i]) > 0) {
       newEdges.push(addRoadEdge(state, nodeIds[i], nodeIds[i + 1], chunks[i]));
+      continue;
+    }
+    // degenerate slice between distinct coincident nodes — stub them together
+    // so the split chain stays connected (same fix buildRoad uses for marks)
+    const na = state.roadNodes.get(nodeIds[i]);
+    const nb = state.roadNodes.get(nodeIds[i + 1]);
+    if (na && nb) {
+      newEdges.push(addRoadEdge(state, nodeIds[i], nodeIds[i + 1], [{ x: na.x, y: na.y }, { x: nb.x, y: nb.y }]));
     }
   }
   return { nodeIds, newEdges };
@@ -268,13 +290,16 @@ export function buildRoad(state, cells) {
     const e = state.roadEdges.get(edgeId);
     if (!e) continue;
     arr.sort((a, b) => a.tEdge - b.tEdge);
+    // coalesce split marks closer than ~1px — they land on the same node,
+    // which keeps coincident junctions single instead of spawning slivers
+    const minGap = 1 / Math.max(1, polyLen(e.pts));
     const ts = [];
     for (const x of arr) {
-      if (!ts.length || Math.abs(ts[ts.length - 1] - x.tEdge) > 0.001) ts.push(x.tEdge);
+      if (!ts.length || x.tEdge - ts[ts.length - 1] > minGap) ts.push(x.tEdge);
     }
     const { nodeIds } = splitEdgeMulti(state, e, ts);
     for (const x of arr) {
-      const ni = ts.findIndex((t) => Math.abs(t - x.tEdge) <= 0.001);
+      const ni = ts.findIndex((t) => Math.abs(t - x.tEdge) <= minGap);
       const nodeId = nodeIds[1 + Math.max(0, ni)];
       if (x.cross) x.cross.nodeId = nodeId;
       else marks.push({ t: x.tNew, nodeId });

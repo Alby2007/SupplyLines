@@ -19,7 +19,6 @@ export function seedInitial(state) {
   };
   placeBuilding(state, 'home', true, undefined, region);
   placeBuilding(state, 'work', true, undefined, region);
-  placeBuilding(state, 'home', true, undefined, region);
 }
 
 // ---- colours ----
@@ -52,6 +51,7 @@ export function pickColor(state, type) {
     let best = null, bestScore = -Infinity;
     for (const c of U) {
       const homes = countByType(state, 'home', c);
+      if (!homes) continue; // a colour with no housing can never staff a work
       const score = homes - countByType(state, 'work', c);
       if (score > bestScore) { bestScore = score; best = c; }
     }
@@ -183,10 +183,15 @@ export function update(state, dt) {
     return;
   }
   checkColorUnlocks(state);
-  // a freshly unlocked colour gets its starter pair placed immediately
-  while (state.colorSeedQueue.length) {
-    const s = state.colorSeedQueue.shift();
-    placeBuilding(state, s.type, false, s.color);
+  // a freshly unlocked colour gets its starter pair placed immediately —
+  // failed placements retry for a while (crowded map) rather than vanishing,
+  // which would leave the colour permanently home-less
+  // one attempt per pending seed per tick — re-queued failures retry on the
+  // next update (a crowded map may open up), and only give up after a while
+  for (const s of state.colorSeedQueue.splice(0)) {
+    if (placeBuilding(state, s.type, false, s.color)) continue;
+    s.tries = (s.tries ?? 0) + 1;
+    if (s.tries < 600) state.colorSeedQueue.push(s);
   }
   for (const b of state.buildings.values()) {
     if (!b.active && state.time >= b.openAt) {

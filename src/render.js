@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js';
+import { presenceCounts } from './agents.js';
 import { trainPos, carPos } from './vehicles.js';
 import { congestFactor } from './routing.js';
 import { roadCellCost, slicePolyline, polyLen, demolishRefund } from './roads.js';
@@ -31,7 +32,8 @@ export function draw(ctx, state, draft, roadDraft, tool, cam, w, h) {
     if (v.kind === 'train') drawTrain(ctx, state, v);
     else drawCar(ctx, v);
   }
-  for (const b of state.buildings.values()) drawBuilding(ctx, state, b);
+  const counts = presenceCounts(state); // one agent scan shared by all buildings
+  for (const b of state.buildings.values()) drawBuilding(ctx, state, b, counts);
   ctx.restore();
   drawLegend(ctx, h);
 }
@@ -235,11 +237,22 @@ function drawCar(ctx, v) {
   ctx.translate(pos.x, pos.y);
   ctx.rotate(pos.angle);
   ctx.fillStyle = PAL(v.color) ?? VEHICLE_COLORS[v.kind] ?? VEHICLE_COLORS.car;
-  ctx.strokeStyle = v.kind === 'milkTruck' ? '#8a857e' : '#fff';
   ctx.lineWidth = 1.2;
-  roundRect(ctx, -6, -3.5, 12, 7, 3); // capsule — the old train shape
-  ctx.fill();
-  ctx.stroke();
+  if (v.kind === 'car') {
+    ctx.strokeStyle = '#fff';
+    roundRect(ctx, -6, -3.5, 12, 7, 3); // commuter capsule
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    // boxy delivery truck: cargo bed + cab nose — reads at a glance vs cars
+    ctx.strokeStyle = v.kind === 'milkTruck' ? '#8a857e' : '#fff';
+    roundRect(ctx, -8, -4.5, 11, 9, 1.5);   // bed
+    ctx.fill();
+    ctx.stroke();
+    roundRect(ctx, 3, -3.5, 5, 7, 1.5);     // cab
+    ctx.fill();
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -282,13 +295,23 @@ function drawTrain(ctx, state, v) {
   ctx.fillStyle = line ? (PAL(line.color) ?? INK) : INK;
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
-  // boxy carriage: sharp corners, window slots, pax shown along the bottom
-  ctx.fillRect(-9, -5, 18, 10);
-  ctx.strokeRect(-9, -5, 18, 10);
-  ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  for (const wx of [-6, -1, 4]) ctx.fillRect(wx, -2.5, 3, 4);
-  for (let i = 0; i < v.pax.length; i++) {
-    ctx.fillRect(-7 + i * 2.4, 2.2, 1.6, 1.8);
+  if (v.freight) {
+    // boxcar: plainer slab with crates stacked along the floor
+    ctx.fillRect(-9, -4.5, 18, 9);
+    ctx.strokeRect(-9, -4.5, 18, 9);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    for (let i = 0; i < v.pax.length; i++) {
+      ctx.fillRect(-7 + i * 3.4, -2, 2.6, 4.5);
+    }
+  } else {
+    // boxy carriage: sharp corners, window slots, pax shown along the bottom
+    ctx.fillRect(-9, -5, 18, 10);
+    ctx.strokeRect(-9, -5, 18, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    for (const wx of [-6, -1, 4]) ctx.fillRect(wx, -2.5, 3, 4);
+    for (let i = 0; i < v.pax.length; i++) {
+      ctx.fillRect(-7 + i * 2.4, 2.2, 1.6, 1.8);
+    }
   }
   ctx.restore();
 }
@@ -309,7 +332,7 @@ const bRad = (b) =>
     : b.type === 'junction' ? CONFIG.buildings.junctionRadius
     : CONFIG.buildings.radius;
 
-function drawBuilding(ctx, state, b) {
+function drawBuilding(ctx, state, b, counts) {
   const r = bRad(b);
   if (!b.active) {
     // incoming-building warning: dashed pulsing outline
@@ -346,11 +369,7 @@ function drawBuilding(ctx, state, b) {
   // homes: residents currently at home, centered in the circle — an empty
   // circle means everyone's out
   if (b.type === 'home') {
-    let out = 0;
-    for (const a of state.agents.values()) {
-      if (a.kind === 'person' && a.home === b.id) out++;
-    }
-    const inHome = Math.max(0, CONFIG.homes.residents - out);
+    const inHome = Math.max(0, CONFIG.homes.residents - (counts.out.get(b.id) ?? 0));
     for (let i = 0; i < inHome; i++) {
       const px = b.x + (i - (inHome - 1) / 2) * 11;
       ctx.fillStyle = '#6b6560';
@@ -361,10 +380,7 @@ function drawBuilding(ctx, state, b) {
   // workplaces: on-shift workers visible inside the building — the same dark
   // squares as the waiting-people glyphs
   if (b.type === 'work') {
-    let onShift = 0;
-    for (const a of state.agents.values()) {
-      if (a.workingAt === b.id) onShift++;
-    }
+    const onShift = counts.shift.get(b.id) ?? 0;
     const cols = 3;
     for (let i = 0; i < Math.min(onShift, 9); i++) {
       const px = b.x + r - 10 - (i % cols) * 12;
@@ -436,16 +452,18 @@ function drawWaiting(ctx, state, b) {
   }
 }
 
-// farms/markets: staff pips below-right, market stock squares above
+// farms/markets: staff as dark squares inside the glyph (green once the
+// building is operational); market stock squares above
 function drawStaff(ctx, state, b) {
   if (b.type !== 'farm' && b.type !== 'market') return;
   const r = bRad(b);
   const staffed = b.workers.length >= CONFIG.food.workersNeeded;
+  const cols = 3;
   for (let i = 0; i < Math.min(b.workers.length, 6); i++) {
-    ctx.fillStyle = staffed ? '#2a9d8f' : '#b0a99c';
-    ctx.beginPath();
-    ctx.arc(b.x + r + 7 + i * 7, b.y + r + 3, 2.6, 0, Math.PI * 2);
-    ctx.fill();
+    const px = b.x + r - 7 - (i % cols) * 8;
+    const py = b.y - r + 7 + Math.floor(i / cols) * 8;
+    ctx.fillStyle = staffed ? '#2a9d8f' : '#6b6560';
+    ctx.fillRect(px - 3, py - 3, 6, 6);
   }
   if (b.type === 'market') {
     for (let i = 0; i < Math.min(b.stock, 6); i++) {

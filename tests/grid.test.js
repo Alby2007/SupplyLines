@@ -4,7 +4,7 @@ import { CONFIG } from '../src/config.js';
 import { createState } from '../src/state.js';
 import {
   cellOf, cellCenter, cellKey, cellsBetween, cellsAlongPolyline,
-  routeCells, routePts,
+  routeCells, routePts, clampCell,
 } from '../src/grid.js';
 import { buildRoad, roadCellIndex } from '../src/roads.js';
 import { lineSegPts, addLine } from '../src/networks.js';
@@ -19,6 +19,14 @@ test('cellOf / cellCenter round-trip', () => {
   const c = cellCenter(4, 5);
   assert.deepEqual(cellOf(c), { cx: 4, cy: 5 });
   assert.equal(c.x, 4 * CS + CS / 2);
+});
+
+test('clampCell pulls out-of-bounds cells back onto the map', () => {
+  const cols = Math.floor(CONFIG.map.width / CS);
+  const rows = Math.floor(CONFIG.map.height / CS);
+  assert.deepEqual(clampCell({ cx: -5, cy: 200 }), { cx: 0, cy: rows - 1 });
+  assert.deepEqual(clampCell({ cx: 100, cy: -3 }), { cx: cols - 1, cy: 0 });
+  assert.deepEqual(clampCell({ cx: 10, cy: 10 }), { cx: 10, cy: 10 });
 });
 
 test('cellsBetween produces contiguous inclusive cell paths', () => {

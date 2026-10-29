@@ -5,6 +5,7 @@ import { createState } from '../src/state.js';
 import { buildRoad } from '../src/roads.js';
 import { cellOf, cellsBetween } from '../src/grid.js';
 import { personDestFor } from '../src/agents.js';
+import { findPath } from '../src/routing.js';
 
 // draw a road between two world points as a contiguous cell path
 function road(s, a, bPt) {
@@ -77,6 +78,17 @@ test('stocked staffed market dispatches milkman and feeds hungry homes', () => {
   assert.ok(mkt.stock < 5, 'stock was not consumed');
 });
 
+test('a market with one worker still runs a truck — staff are the drivers', () => {
+  const s = createState();
+  const home = b(s, 1, 'home', 100, 100, { hungerT: 50 });
+  // 1 worker < workersNeeded(2): old all-or-nothing rule sent zero trucks
+  const mkt = b(s, 2, 'market', 300, 100, { workers: [45], stock: 5 });
+  road(s, { x: 100, y: 100 }, { x: 300, y: 100 });
+
+  runTicks(s, 15);
+  assert.ok(home.fedAt > 0, 'understaffed market never dispatched');
+});
+
 test('full food chain: workers → farm → crates → market → fed home', () => {
   const s = createState();
   const home = b(s, 1, 'home', 100, 100, { hungerT: -30 });
@@ -88,4 +100,25 @@ test('full food chain: workers → farm → crates → market → fed home', () 
   assert.ok(s.freightDelivered > 0, 'no crates delivered');
   assert.ok(home.fedAt > 0, 'home never fed');
   assert.equal(s.gameOver, null);
+});
+
+// staff keep their agent through the shift (like office workers) — the home's
+// resident slot stays taken until they actually commute back
+test('farm staff persist through the shift, then commute home', () => {
+  const s = createState();
+  const h = b(s, 1, 'home', 100, 100, { spawnClock: 99999, hungerT: -9999 });
+  const f = b(s, 2, 'farm', 500, 100);
+  road(s, h, f);
+  const a = agents.spawnAgent(s, h, 'person', (bb) => bb.id === f.id);
+  a.legs = findPath(s, h.id, (bb) => bb.id === f.id);
+
+  runTicks(s, 15); // drive to the farm
+  assert.equal(a.workingAt, f.id);
+  assert.equal(f.workers.length, 1);
+  assert.ok(s.agents.has(a.id), 'staff agent should persist through the shift');
+  const out = [...s.agents.values()].filter((x) => x.home === h.id).length;
+  assert.equal(out, 1, 'resident slot should stay taken while on-shift');
+
+  runTicks(s, 95); // shift ends (~75s) + commute home
+  assert.ok(!s.agents.has(a.id), 'returned worker should be deleted at home');
 });

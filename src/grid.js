@@ -21,6 +21,15 @@ export function cellCenter(cx, cy) {
   return { x: cx * CS() + CS() / 2, y: cy * CS() + CS() / 2 };
 }
 
+// pull a cell back inside the world rectangle — drawn paths must not
+// leave the map (cells off the edge still cost tiles but can't be seen)
+export function clampCell(c) {
+  return {
+    cx: Math.max(0, Math.min(Math.floor(CONFIG.map.width / CS()) - 1, c.cx)),
+    cy: Math.max(0, Math.min(Math.floor(CONFIG.map.height / CS()) - 1, c.cy)),
+  };
+}
+
 export const cellKey = (c) => `${c.cx},${c.cy}`;
 
 export function snapPosToCell(p) {

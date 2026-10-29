@@ -21,6 +21,32 @@ export const personDestFor = (color) => [understaffedFor(color), officeFor(color
 
 export const marketMatch = (b) => b.type === 'market' && b.active;
 
+// who is out of which home / on shift at which building — one O(agents) scan
+// shared by every building in a step, instead of a scan per building
+export function presenceCounts(state) {
+  const out = new Map();   // home bid → residents currently out
+  const shift = new Map(); // building bid → agents working there
+  for (const a of state.agents.values()) {
+    if (a.kind === 'person' && a.home != null) out.set(a.home, (out.get(a.home) ?? 0) + 1);
+    if (a.workingAt != null) shift.set(a.workingAt, (shift.get(a.workingAt) ?? 0) + 1);
+  }
+  return { out, shift };
+}
+
+// crates on a freight-connected farm target that line's markets first —
+// product prefers the railway; any market is the fallback
+function crateMatchers(state, locBid) {
+  const onLine = new Set();
+  for (const l of state.lines.values()) {
+    if (!l.freight || !l.stops.includes(locBid)) continue;
+    for (const s of l.stops) {
+      const b = state.buildings.get(s);
+      if (b?.type === 'market') onLine.add(b.id);
+    }
+  }
+  return onLine.size ? [(b) => onLine.has(b.id), marketMatch] : [marketMatch];
+}
+
 export function spawnAgent(state, atBuilding, kind, dest) {
   const a = {
     id: nid(state),
@@ -59,10 +85,13 @@ export function update(state, dt) {
     if (!a.legs) {
       a.retryT -= dt;
       if (a.retryT <= 0) {
-        const matchers = Array.isArray(a.dest) ? a.dest : [a.dest];
-        // people may only ride lines of their own colour; crates ride any
-        // (colour-locked stops mean they can only alight at matching markets)
-        const opts = a.kind === 'person' ? { lineColor: a.color } : {};
+        const matchers =
+          a.kind === 'crate'
+            ? crateMatchers(state, a.loc)
+            : Array.isArray(a.dest) ? a.dest : [a.dest];
+        // people ride lines of their own colour (never freight); crates
+        // only board freight trains — passenger cars won't take them
+        const opts = a.kind === 'person' ? { lineColor: a.color } : { freight: true };
         for (const m of matchers) {
           a.legs = findPath(state, a.loc, m, opts);
           if (a.legs) break;
@@ -76,6 +105,21 @@ export function update(state, dt) {
       const b = state.buildings.get(a.loc);
       const v = spawnCar(state, a, a.legs[0], a.kind === 'crate' ? 'foodTruck' : 'car');
       if (v) {
+        // carpool: a household-mate routed to the same building rides along
+        if (a.kind === 'person') {
+          const dest = a.legs.at(-1).to;
+          for (const oid of [...b.waiting]) {
+            if (v.pax.length >= CONFIG.homes.residents) break;
+            if (oid === a.id) continue;
+            const o = state.agents.get(oid);
+            if (o?.kind !== 'person' || o.home !== a.home || !o.legs?.length) continue;
+            if (o.legs.at(-1).to !== dest) continue;
+            o.legs = a.legs.slice(); // same route — they alight together
+            o.loc = { veh: v.id };
+            v.pax.push(o.id);
+            b.waiting.splice(b.waiting.indexOf(oid), 1);
+          }
+        }
         const i = b.waiting.indexOf(a.id);
         if (i >= 0) b.waiting.splice(i, 1);
       } else {

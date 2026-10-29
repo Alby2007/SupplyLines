@@ -68,8 +68,8 @@ export function buildGraph(state, modes = null) {
       const bb = state.buildings.get(b);
       if (!ba || !bb) continue;
       const cost = lineSegLen(state, a, b) / CONFIG.trains.speed + CONFIG.costs.stopPenalty;
-      adj.get(bkey(a)).push({ to: bkey(b), cost, mode: 'line', lineId: line.id, lineColor: line.color, wait });
-      adj.get(bkey(b)).push({ to: bkey(a), cost, mode: 'line', lineId: line.id, lineColor: line.color, wait });
+      adj.get(bkey(a)).push({ to: bkey(b), cost, mode: 'line', lineId: line.id, lineColor: line.color, wait, freight: !!line.freight });
+      adj.get(bkey(b)).push({ to: bkey(a), cost, mode: 'line', lineId: line.id, lineColor: line.color, wait, freight: !!line.freight });
     }
   }
 
@@ -88,12 +88,23 @@ export function buildGraph(state, modes = null) {
   return { nodes, adj };
 }
 
+// graphs are rebuilt constantly by retries/dispatches — cache per modes slot,
+// keyed on netVersion (topology must match exactly: legs reference edge ids)
+// plus a sim-time epoch so congestion costs refresh without every-call builds
+function graphFor(state, modes) {
+  const g = (state._graphs ??= { key: '', slots: {} });
+  const key = `${state.netVersion}:${Math.floor(state.time / 0.8)}`;
+  if (g.key !== key) { g.key = key; g.slots = {}; }
+  const mk = modes == null || (modes.line && modes.road) ? 'a' : modes.line ? 'l' : 'r';
+  return (g.slots[mk] ??= buildGraph(state, modes));
+}
+
 // Dijkstra over (node, incoming-transport) states so transfers get penalized once.
 // dest: building-type string or predicate(building)→bool. opts: {modes:{line,road}}
 // Returns legs: [{mode, lineId, from, to, fromNode, toNode, nodes[], edgeIds[]}] or null.
 export function findPath(state, fromBid, dest, opts = {}) {
   const match = typeof dest === 'function' ? dest : (b) => b.type === dest;
-  const { nodes, adj } = buildGraph(state, opts.modes);
+  const { nodes, adj } = graphFor(state, opts.modes);
   const start = bkey(fromBid);
   if (!nodes.has(start)) return null;
 
@@ -121,8 +132,12 @@ export function findPath(state, fromBid, dest, opts = {}) {
     }
 
     for (const e of adj.get(cur.n) ?? []) {
-      // colour-locked lines: agents may only board a line of their colour
-      if (opts.lineColor != null && e.mode === 'line' && e.lineColor !== opts.lineColor) continue;
+      if (e.mode === 'line') {
+        // colour-locked lines: people only board their colour, never freight
+        if (opts.lineColor != null && (e.freight || e.lineColor !== opts.lineColor)) continue;
+        // crates only ride freight lines — passenger trains won't take them
+        if (opts.freight && !e.freight) continue;
+      }
       const em = e.mode === 'line' ? `l${e.lineId}` : 'r';
       // boarding a line costs its expected wait (once, on entry, incl. the
       // first leg); switching transport mid-trip adds a transfer penalty
@@ -186,7 +201,7 @@ export function findPathTo(state, fromBid, toBid, opts = {}) {
 // multi-source Dijkstra over the road graph only: for every node, the distance
 // to and id of its nearest source building. Used for home→market assignment.
 export function roadDistancesFrom(state, sourceBids) {
-  const { adj } = buildGraph(state, { line: false, road: true });
+  const { adj } = graphFor(state, { line: false, road: true });
   const distM = new Map();
   const src = new Map();
   const pq = [];

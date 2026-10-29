@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createState } from '../src/state.js';
 import { addLine } from '../src/networks.js';
-import { findPath } from '../src/routing.js';
+import { findPath, findPathTo } from '../src/routing.js';
+import { buildRoad, demolishRoad } from '../src/roads.js';
+import { cellOf, cellsBetween } from '../src/grid.js';
 
 function b(state, id, type, x, y) {
   state.buildings.set(id, {
@@ -76,4 +78,21 @@ test('multi-stop ride compresses into one leg', () => {
   const legs = findPath(s, 1, 'work');
   assert.equal(legs.length, 1);
   assert.deepEqual(legs[0].nodes.map((n) => n.replace('b', '')).map(Number), [1, 2, 3]);
+});
+
+// the graph cache keys on netVersion — demolished edges must never leak into
+// a later route, even with the sim clock frozen (same congestion epoch)
+test('findPath reflects demolition despite graph caching', () => {
+  const s = createState();
+  b(s, 1, 'home', 100, 100);
+  b(s, 2, 'work', 400, 100);
+  const cells = cellsBetween(cellOf({ x: 100, y: 100 }), cellOf({ x: 400, y: 100 }));
+  buildRoad(s, cells);
+
+  const legs1 = findPathTo(s, 1, 2);
+  assert.ok(legs1?.some((l) => l.mode === 'road'), 'road route should exist');
+
+  demolishRoad(s, cells);
+  const legs2 = findPathTo(s, 1, 2);
+  assert.ok(!legs2?.some((l) => l.mode === 'road'), 'dead edges must not route');
 });

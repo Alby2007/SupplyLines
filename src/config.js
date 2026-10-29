@@ -43,18 +43,23 @@ export const CONFIG = {
   roads: {
     carSpeed: 90,
     truckSpeed: 70,
-    width: 11,              // px — two visible lanes
+    width: 16,              // px — two visible lanes
+    laneOffset: 4,          // px — vehicles keep right of the centre line
     congestAt: 6,           // vehicles on an edge before slowdown kicks in
     congestFactor: 0.45,    // speed multiplier at full congestion
     maxPerEdge: 12,
     snap: 26,               // px — endpoints snap to buildings/roads within this
+    followGap: 16,          // px centre-to-centre spacing cars keep while queued
+    yieldLookahead: 14,     // px before a node where junction checks engage
+    junctionBox: 16,        // px radius around a node that counts as "in the junction"
+    yieldPatience: 1.5,     // s a yielded car waits before nosing in anyway
     tilesStart: 40,         // road budget at game start
     tilesPerWeek: 18,       // road budget granted each week
     tilesCap: 99,
   },
   food: {
     produceInterval: 6,     // seconds per crate at a staffed farm
-    workersNeeded: 3,       // workers on-site for a farm/market to operate
+    workersNeeded: 2,       // workers on-site to fully staff a farm/market
     shiftLen: 75,           // seconds an arrived worker stays on-shift
     stockpileCap: 10,
     hungerLimit: 90,        // seconds a home can go unfed

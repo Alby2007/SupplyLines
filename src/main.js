@@ -65,7 +65,7 @@ function frame(now) {
   last = now;
   if (dt > 0.25) dt = 0.25;
   if (!state.paused && !state.gameOver && !state.upgradePending) {
-    acc += dt * state.speed;
+    acc += dt * state.speed * 0.5; // 1x = half-pace, 2x = the original speed
     while (acc >= STEP) {
       tick(STEP);
       acc -= STEP;

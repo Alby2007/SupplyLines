@@ -65,8 +65,9 @@ function assignHomes(state) {
 
 function tryDispatch(state, m) {
   if (m.stock <= 0) return;
-  if (m.workers.length < CONFIG.food.workersNeeded) return;
-  if ((m.activeTrucks || 0) >= m.trucks) return;
+  // market staff are the truck drivers — each worker means one more truck
+  // that can be on the road, so a short-staffed market still delivers, slower
+  if ((m.activeTrucks || 0) >= Math.min(m.trucks, m.workers.length)) return;
   const targets = hungryAssigned(state, m.id);
   if (!targets.length) return;
   const load = Math.min(m.stock, CONFIG.food.milkCap, targets.length);

@@ -1,11 +1,12 @@
 import { CONFIG } from './config.js';
-import { spawnAgent, personDestFor } from './agents.js';
+import { spawnAgent, personDestFor, presenceCounts } from './agents.js';
 
 const OVERFLOW_REASONS = {
   home: 'A home overflowed',
   work: 'A workplace overflowed',
   farm: 'Food rotted at a farm',
   market: 'A market overflowed',
+  junction: 'A junction overflowed',
 };
 
 export function update(state, dt) {
@@ -14,6 +15,7 @@ export function update(state, dt) {
     if (b.type === 'farm' && b.active) { foodEra = true; break; }
   }
 
+  let counts = null; // built lazily — only when a spawn check actually fires
   for (const b of state.buildings.values()) {
     if (!b.active) continue;
 
@@ -21,11 +23,8 @@ export function update(state, dt) {
       b.spawnClock -= dt;
       if (b.spawnClock <= 0) {
         b.spawnClock = 1; // retry soon — a home is capped at `residents` people out
-        let out = 0;
-        for (const a of state.agents.values()) {
-          if (a.kind === 'person' && a.home === b.id) out++;
-        }
-        if (out < CONFIG.homes.residents) {
+        counts ??= presenceCounts(state);
+        if ((counts.out.get(b.id) ?? 0) < CONFIG.homes.residents) {
           b.spawnClock =
             CONFIG.commuters.interval * (1 + (Math.random() * 2 - 1) * CONFIG.commuters.jitter);
           spawnAgent(state, b, 'person', personDestFor(b.color));

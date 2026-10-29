@@ -8,6 +8,7 @@ import {
 import { buildRoad } from '../src/roads.js';
 import { cellOf, cellsBetween, cellKey } from '../src/grid.js';
 import { findPath } from '../src/routing.js';
+import * as economy from '../src/economy.js';
 
 function b(state, id, type, x, y) {
   state.buildings.set(id, {
@@ -107,4 +108,24 @@ test('passengers transfer between lines at a junction mid-track', () => {
   assert.equal(legs[0].to, j.id);
   assert.equal(legs[1].from, j.id);
   assert.equal(legs[1].to, 3);
+});
+
+// junctions claim their tile — a cell a road already runs through is occupied
+test('junction placement rejects a cell that already holds a road', () => {
+  const s = createState();
+  b(s, 1, 'home', 100, 100);
+  b(s, 2, 'work', 300, 100);
+  addLine(s, [1, 2]);
+  // road crossing the track's middle cell — (4,2) sits on the line's path
+  buildRoad(s, cellsBetween({ cx: 4, cy: 1 }, { cx: 4, cy: 3 }));
+  assert.equal(junctionPlacement(s, { x: 180, y: 100 }), null);
+});
+
+test('an overflowing junction reports a junction-specific game over', () => {
+  const s = createState();
+  const j = addJunction(s, 200, 200, 0);
+  j.waiting = [1, 2, 3, 4, 5, 6]; // at capacity
+  j.overflowT = CONFIG.overflowLimit;
+  economy.update(s, 1 / 60);
+  assert.equal(s.gameOver?.reason, 'A junction overflowed');
 });

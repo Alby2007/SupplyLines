@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 import { nid } from './state.js';
 import { roadNodeKey, nodePos, congestFactor, findPathTo } from './routing.js';
 import { polyLen, pointAtLen } from './roads.js';
-import { lineSegPts, lineSegLen } from './networks.js';
+import { lineSegPts, lineSegLen, linesThrough } from './networks.js';
 
 // Arrival resolution: crates stock markets; farm/market arrivals staff shifts;
 // office workers take a shift then commute home (Motorways round trips) — the
@@ -37,23 +37,32 @@ export function arrive(state, a, bid) {
     a.legs = null;
     return;
   }
-  state.agents.delete(a.id);
+  // farm/market staff work a shift like office workers — keep the agent so it
+  // commutes home when the shift ends; its home's resident slot stays taken
+  // until they're actually back (otherwise homes could over-produce workers)
   if (b && (b.type === 'farm' || b.type === 'market') &&
       b.workers.length < CONFIG.food.workersNeeded * 2) {
     b.workers.push(CONFIG.food.shiftLen);
+    a.shiftT = CONFIG.food.shiftLen;
+    a.workingAt = bid;
+    a.loc = bid;
+    a.legs = null;
+    return;
   }
+  state.agents.delete(a.id);
 }
 
 // ---- trains ----
 
-export function addTrain(state, line) {
+export function addTrain(state, line, tOffset = 0) {
   const t = {
     id: nid(state),
     kind: 'train',
     line: line.id,
+    freight: !!line.freight,
     from: 0,
     dir: 1,
-    t: 0,
+    t: tOffset,
     dwellT: CONFIG.trains.dwell,
     pax: [],
     cap: CONFIG.trains.capacity,
@@ -61,6 +70,21 @@ export function addTrain(state, line) {
   state.vehicles.set(t.id, t);
   line.trains.push(t.id);
   return t;
+}
+
+// when a new line joins the network at a junction, every existing line it
+// touches earns one extra single-carriage train
+export function awardConnectionTrains(state, line) {
+  const awarded = new Set();
+  for (const sid of line.stops) {
+    if (state.buildings.get(sid)?.type !== 'junction') continue;
+    for (const other of linesThrough(state, sid)) {
+      if (other.id !== line.id && !awarded.has(other.id)) {
+        awarded.add(other.id);
+        addTrain(state, other, 0.5); // stagger so it doesn't shadow the first
+      }
+    }
+  }
 }
 
 export function trainPos(state, v) {
@@ -90,8 +114,9 @@ export function segsForLeg(state, leg) {
     const edgeId = leg.edgeIds[i];
     const e = edgeId != null ? state.roadEdges.get(edgeId) : null;
     let pts;
+    let fwd = true;
     if (e) {
-      const fwd = roadNodeKey(state.roadNodes.get(e.a)) === leg.nodes[i];
+      fwd = roadNodeKey(state.roadNodes.get(e.a)) === leg.nodes[i];
       pts = fwd ? e.pts : [...e.pts].reverse();
     } else {
       const a = nodePos(state, leg.nodes[i]);
@@ -99,7 +124,7 @@ export function segsForLeg(state, leg) {
       if (!a || !b) continue;
       pts = [a, b];
     }
-    segs.push({ pts, len: Math.max(1, polyLen(pts)), edgeId: e ? e.id : null });
+    segs.push({ pts, len: Math.max(1, polyLen(pts)), edgeId: e ? e.id : null, fwd });
   }
   return segs;
 }
@@ -160,33 +185,25 @@ function milkArrive(state, v) {
       home.fedAt = state.time;
     }
     v.targets.shift();
-    if (v.load > 0 && v.targets.length) {
-      // continue to next hungry home from wherever we are
-      const legs = findPathTo(state, home.id, v.targets[0], { modes: { line: false, road: true } });
+    const reroute = (from, to) => {
+      const legs = findPathTo(state, from, to, { modes: { line: false, road: true } });
       const leg = legs?.find((l) => l.mode === 'road');
       const segs = leg && segsForLeg(state, leg);
-      if (segs?.length) {
-        v.segs = segs;
-        v.seg = 0;
-        v.dist = 0;
-        registerOnEdge(state, v);
-        return;
-      }
+      if (!segs?.length) return false;
+      leaveEdge(state, v); // drop the old edge before swapping segs
+      v.segs = segs;
+      v.seg = 0;
+      v.dist = 0;
+      registerOnEdge(state, v);
+      return true;
+    };
+    if (v.load > 0 && v.targets.length) {
+      // continue to next hungry home from wherever we are
+      if (reroute(home.id, v.targets[0])) return;
     }
     // out of load or targets → head home
     v.phase = 'return';
-    if (home && market) {
-      const legs = findPathTo(state, home.id, market.id, { modes: { line: false, road: true } });
-      const leg = legs?.find((l) => l.mode === 'road');
-      const segs = leg && segsForLeg(state, leg);
-      if (segs?.length) {
-        v.segs = segs;
-        v.seg = 0;
-        v.dist = 0;
-        registerOnEdge(state, v);
-        return;
-      }
-    }
+    if (home && market && reroute(home.id, market.id)) return;
   }
   // arrived back at market (or can't get home) → despawn
   leaveEdge(state, v);
@@ -197,10 +214,31 @@ function milkArrive(state, v) {
 // ---- shared update ----
 
 export function update(state, dt) {
+  state._tick = (state._tick ?? 0) + 1;
   for (const v of [...state.vehicles.values()]) {
     if (v.kind === 'train') updateTrain(state, v, dt);
     else updateRoadVeh(state, v, dt);
   }
+}
+
+// per-tick spatial buckets for junction-yield queries — positions are a
+// snapshot per tick (drift ≤ speed·dt ≈ 1.5px, negligible vs the 16px box),
+// so each approaching car checks 9 buckets instead of every vehicle
+function yieldIndex(state) {
+  if (state._yieldV === state._tick) return state._yieldIdx;
+  const B = CONFIG.roads.junctionBox;
+  const idx = new Map();
+  for (const w of state.vehicles.values()) {
+    if (w.kind === 'train') continue;
+    const p = carPos(w);
+    const k = `${Math.floor(p.x / B)}:${Math.floor(p.y / B)}`;
+    let arr = idx.get(k);
+    if (!arr) idx.set(k, (arr = []));
+    arr.push({ w, p });
+  }
+  state._yieldIdx = idx;
+  state._yieldV = state._tick;
+  return idx;
 }
 
 function updateRoadVeh(state, v, dt) {
@@ -208,6 +246,54 @@ function updateRoadVeh(state, v, dt) {
   const e = seg?.edgeId != null ? state.roadEdges.get(seg.edgeId) : null;
   const base = v.kind === 'car' ? CONFIG.roads.carSpeed : CONFIG.roads.truckSpeed;
   let d = base * (e ? congestFactor(state, e) : 1) * dt;
+
+  // ---- traffic: keep a gap behind the car ahead, yield at junctions ----
+  v.yielding = false;
+  if (e && seg) {
+    const T = CONFIG.roads;
+    // each car's position along the edge's own arclength (segs may run reversed)
+    const pe = seg.fwd ? v.dist : seg.len - v.dist;
+    for (const wid of e.vehicles) {
+      if (wid === v.id) continue;
+      const w = state.vehicles.get(wid);
+      const ws = w?.segs[w.seg];
+      if (!ws || ws.edgeId !== e.id || ws.fwd !== seg.fwd) continue;
+      const pw = ws.fwd ? w.dist : ws.len - w.dist;
+      // lead gap measured in TRAVEL direction: forward cars chase larger pe,
+      // reversed cars chase smaller pe — otherwise a follower reads as "ahead"
+      const gap = seg.fwd ? pw - pe : pe - pw;
+      if (gap > 0) d = Math.min(d, Math.max(0, gap - T.followGap));
+    }
+    // junction yield: hold short of the node while another vehicle is inside.
+    // Patience cap: a yielded car eventually noses in — without it a stopped
+    // car parked in the box (follow-blocked, non-yielding) deadlocks everyone.
+    const rem = seg.len - v.dist;
+    if (rem < T.yieldLookahead) {
+      const node = seg.pts[seg.pts.length - 1];
+      const B = T.junctionBox;
+      const idx = yieldIndex(state);
+      const bx = Math.floor(node.x / B);
+      const by = Math.floor(node.y / B);
+      let blocked = false;
+      for (let dx = -1; dx <= 1 && !blocked; dx++) {
+        for (let dy = -1; dy <= 1 && !blocked; dy++) {
+          for (const c of idx.get(`${bx + dx}:${by + dy}`) ?? []) {
+            if (c.w === v || c.w.yielding || !state.vehicles.has(c.w.id)) continue;
+            if (Math.hypot(c.p.x - node.x, c.p.y - node.y) < B) { blocked = true; break; }
+          }
+        }
+      }
+      if (blocked) {
+        v.yielding = true;
+        v.yieldT = (v.yieldT || 0) + dt;
+        if (v.yieldT < T.yieldPatience) d = Math.min(d, Math.max(0, rem - 2));
+      } else {
+        v.yieldT = 0;
+      }
+    } else {
+      v.yieldT = 0;
+    }
+  }
 
   while (d > 0) {
     const s = v.segs[v.seg];
@@ -235,19 +321,27 @@ export function carPos(v) {
   if (!seg) return { x: 0, y: 0, angle: 0 };
   const p = pointAtLen(seg.pts, v.dist);
   const p2 = pointAtLen(seg.pts, Math.min(seg.len, v.dist + 2));
-  return { x: p.x, y: p.y, angle: Math.atan2(p2.y - p.y, p2.x - p.x) };
+  const angle = Math.atan2(p2.y - p.y, p2.x - p.x);
+  // keep right: offset perpendicular to travel (screen-y is down, so right
+  // of the direction vector is (-sin, cos))
+  const L = CONFIG.roads.laneOffset;
+  return {
+    x: p.x - Math.sin(angle) * L,
+    y: p.y + Math.cos(angle) * L,
+    angle,
+  };
 }
 
 function arriveCar(state, v) {
-  const a = state.agents.get(v.pax[0]);
   state.vehicles.delete(v.id);
-  if (!a) return;
-  const leg = a.legs.shift();
-  a.loc = leg.to;
-  if (!a.legs.length) {
-    arrive(state, a, leg.to);
-  } else {
-    state.buildings.get(leg.to)?.waiting.push(a.id);
+  // every passenger resolves their own leg — carpools alight together
+  for (const aid of v.pax) {
+    const a = state.agents.get(aid);
+    if (!a) continue;
+    const leg = a.legs.shift();
+    a.loc = leg.to;
+    if (!a.legs.length) arrive(state, a, leg.to);
+    else state.buildings.get(leg.to)?.waiting.push(a.id);
   }
 }
 
@@ -283,33 +377,49 @@ function exchange(state, v, line, bid) {
 
   for (let i = v.pax.length - 1; i >= 0; i--) {
     const a = state.agents.get(v.pax[i]);
-    const leg = a?.legs?.[0];
-    if (a && leg && leg.mode === 'line' && leg.lineId === line.id && leg.to === bid) {
-      v.pax.splice(i, 1);
-      a.legs.shift();
-      a.loc = bid;
-      if (a.legs.length === 0) arrive(state, a, bid);
-      else b.waiting.push(a.id);
+    if (!a) continue;
+    const leg = a.legs?.[0];
+    const stranded = !leg; // their stop or line vanished mid-ride — get off here
+    if (!stranded && !(leg.mode === 'line' && leg.lineId === line.id && leg.to === bid)) continue;
+    v.pax.splice(i, 1);
+    a.legs?.shift();
+    a.loc = bid;
+    if (stranded) {
+      a.legs = null; // forces a fresh path compute at this stop
+      a.retryT = 0;
+      b.waiting.push(a.id);
+    } else if (a.legs.length === 0) {
+      arrive(state, a, bid);
+    } else {
+      b.waiting.push(a.id);
     }
   }
 
-  let crates = 0;
-  for (const aid of v.pax) {
-    if (state.agents.get(aid)?.kind === 'crate') crates++;
+  // one carriage, one cargo: freight trains haul only crates, people trains
+  // only people — a crate will never board a passenger carriage and vice versa
+  let crateRoom = 0;
+  let seatRoom = 0;
+  if (v.freight) {
+    let crates = 0;
+    for (const aid of v.pax) {
+      if (state.agents.get(aid)?.kind === 'crate') crates++;
+    }
+    crateRoom = Math.max(0, CONFIG.food.crateCap * (1 + (line.wagons || 0)) - crates);
+  } else {
+    seatRoom = Math.max(0, v.cap - v.pax.length);
   }
-  const crateRoom = Math.max(0, line.wagons * CONFIG.food.crateCap - crates);
 
-  let boardedCrates = 0;
   for (let i = b.waiting.length - 1; i >= 0; i--) {
     const a = state.agents.get(b.waiting[i]);
     const leg = a?.legs?.[0];
     if (!leg || leg.mode !== 'line' || leg.lineId !== line.id) continue;
     if (!dirOk(line, v, leg)) continue;
     if (a.kind === 'crate') {
-      if (boardedCrates >= crateRoom) continue;
-      boardedCrates++;
-    } else if (v.pax.length - crates >= v.cap) {
-      continue; // passenger section full (crates ride the wagon)
+      if (crateRoom <= 0) continue;
+      crateRoom--;
+    } else {
+      if (seatRoom <= 0) continue;
+      seatRoom--;
     }
     b.waiting.splice(i, 1);
     v.pax.push(a.id);

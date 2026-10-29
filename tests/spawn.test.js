@@ -1,14 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createState, dist } from '../src/state.js';
-import { placeBuilding, seedInitial, pickType, spawnInterval } from '../src/spawn.js';
+import { placeBuilding, seedInitial, pickType, pickColor, spawnInterval, update } from '../src/spawn.js';
 import { CONFIG } from '../src/config.js';
-import { buildingCells } from '../src/grid.js';
+import { buildingCells, cellsBetween } from '../src/grid.js';
+import { buildRoad } from '../src/roads.js';
+
+function b(state, id, type, x, y, color = 0) {
+  state.buildings.set(id, {
+    id, type, x, y, color, active: true, waiting: [], capacity: 6, overflowT: 0,
+    spawnClock: 2, workers: [], stock: 0, hungerT: 0, produceClock: 0,
+    assignedMarket: null, marketDist: Infinity,
+  });
+}
 
 test('seeded buildings respect minimum spacing', () => {
   const s = createState();
   seedInitial(s);
-  assert.equal(s.buildings.size, 3);
+  assert.equal(s.buildings.size, 2);
   const list = [...s.buildings.values()];
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
@@ -120,4 +129,30 @@ test('spawn interval ramps down but never below minimum', () => {
   assert.equal(spawnInterval(s), CONFIG.spawn.intervalStart);
   s.week = 50;
   assert.equal(spawnInterval(s), CONFIG.spawn.intervalMin);
+});
+
+// a colour with no homes can never staff a workplace — its homes−works score
+// (0) must not beat a colour that's merely over-worked
+test('pickColor for a work skips colours that have no homes', () => {
+  const s = createState();
+  s.unlockedColors = [0, 1];
+  b(s, 1, 'home', 100, 100, 0);
+  for (let i = 0; i < 5; i++) b(s, 10 + i, 'work', 300 + i * 100, 100, 0);
+  assert.equal(pickColor(s, 'work'), 0);
+});
+
+// a forced seed that can't be placed (crowded map) stays queued and retries
+// instead of silently dropping — a lost seed leaves a colour home-less
+test('a colour seed that cannot be placed retries, then gives up', () => {
+  const s = createState();
+  b(s, 1, 'home', 100, 100); // keeps update() out of the seedInitial path
+  // pave every spawnable cell so placeBuilding can never succeed
+  for (let cy = 3; cy <= 28; cy++) {
+    buildRoad(s, cellsBetween({ cx: 3, cy }, { cx: 36, cy }));
+  }
+  s.colorSeedQueue.push({ type: 'home', color: 1 });
+  update(s, 1 / 60);
+  assert.equal(s.colorSeedQueue.length, 1, 'failed seed should stay queued');
+  for (let i = 0; i < 620; i++) update(s, 1 / 60);
+  assert.equal(s.colorSeedQueue.length, 0, 'seed should give up after retries');
 });

@@ -3,6 +3,10 @@ import { addTrain } from './vehicles.js';
 import { getTool, setTool } from './input.js';
 
 let el = {};
+// last-rendered HUD values — DOM writes only happen on change, not per frame
+let lastColorsHtml = '';
+let lastRoad = -1;
+let lastLines = -1;
 
 const UPGRADES = [
   {
@@ -36,10 +40,10 @@ const UPGRADES = [
   },
   {
     name: 'Cargo wagon (freight by rail)',
-    ok: (s) => s.lines.size > 0,
+    ok: (s) => [...s.lines.values()].some((l) => l.freight),
     apply: (s) => {
-      const lines = [...s.lines.values()];
-      lines.reduce((a, b) => (a.wagons <= b.wagons ? a : b)).wagons++;
+      const fs = [...s.lines.values()].filter((l) => l.freight);
+      fs.reduce((a, b) => (a.wagons <= b.wagons ? a : b)).wagons++;
     },
   },
   {
@@ -107,8 +111,15 @@ export function updateHUD(state) {
   el.roadbar.classList.toggle('hidden', !roadGroup);
   el.hotJunction.classList.toggle('on', tool === 'junction');
   el.hotBulldoze.classList.toggle('on', tool === 'bulldoze');
-  el.hotRoadCount.textContent = state.roadTiles;
-  el.hotLineCount.textContent = state.maxLines - state.lines.size;
+  if (lastRoad !== state.roadTiles) {
+    lastRoad = state.roadTiles;
+    el.hotRoadCount.textContent = state.roadTiles;
+  }
+  const linesLeft = state.maxLines - state.lines.size;
+  if (lastLines !== linesLeft) {
+    lastLines = linesLeft;
+    el.hotLineCount.textContent = linesLeft;
+  }
 
   // per-colour population dots; the next colour shows dimmed as it charges
   const counts = new Map();
@@ -127,7 +138,10 @@ export function updateHUD(state) {
       `<span class="cdot" style="background:${CONFIG.colors.palette[i]};opacity:${unlocked ? 1 : 0.35}"></span>` +
       `<span class="ccount">${n}</span></span>`;
   }
-  el.colors.innerHTML = html;
+  if (html !== lastColorsHtml) {
+    lastColorsHtml = html;
+    el.colors.innerHTML = html;
+  }
 }
 
 export function showUpgrade(state) {
