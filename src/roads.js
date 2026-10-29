@@ -291,9 +291,21 @@ export function buildRoad(state, cells) {
   }
   const edges = [];
   for (let i = 1; i < uniq.length; i++) {
+    const aId = uniq[i - 1].nodeId;
+    const bId = uniq[i].nodeId;
+    if (aId === bId) continue;
     const chunk = slicePolyline(pts, uniq[i - 1].t, uniq[i].t);
     if (chunk.length >= 2 && polyLen(chunk) > 1) {
-      edges.push(addRoadEdge(state, uniq[i - 1].nodeId, uniq[i].nodeId, chunk));
+      edges.push(addRoadEdge(state, aId, bId, chunk));
+      continue;
+    }
+    // two different nodes landed at the same path fraction — a building that
+    // brushed the road near an endpoint shadows the anchor mark, and skipping
+    // the zero-length chunk would orphan its node. Link them with a stub.
+    const na = state.roadNodes.get(aId);
+    const nb = state.roadNodes.get(bId);
+    if (na && nb) {
+      edges.push(addRoadEdge(state, aId, bId, [{ x: na.x, y: na.y }, { x: nb.x, y: nb.y }]));
     }
   }
   return edges;
@@ -302,6 +314,48 @@ export function buildRoad(state, cells) {
 export function roadCost(pts) {
   // unique-cell count for callers with only raw geometry (no reuse discount)
   return new Set(cellsAlongPolyline(pts).map(cellKey)).size;
+}
+
+// ---- bulldozer ----
+
+// edges a drawn path would demolish + the tiles that would be freed
+function demolishTargets(state, cells) {
+  const idx = roadCellIndex(state);
+  const cellSet = new Set(cells.map(cellKey));
+  const doomed = new Set();
+  for (const k of cellSet) {
+    for (const occ of idx.get(k) ?? []) doomed.add(occ.edgeId);
+  }
+  const freed = new Set();
+  for (const id of doomed) {
+    const e = state.roadEdges.get(id);
+    if (e) for (const c of cellsAlongPolyline(e.pts)) freed.add(cellKey(c));
+  }
+  // a freed cell stays road if a surviving edge still covers it
+  for (const e of state.roadEdges.values()) {
+    if (doomed.has(e.id)) continue;
+    for (const c of cellsAlongPolyline(e.pts)) freed.delete(cellKey(c));
+  }
+  return { doomed, freed: freed.size };
+}
+
+// tiles a bulldozer drag would return to the inventory
+export function demolishRefund(state, cells) {
+  return demolishTargets(state, cells).freed;
+}
+
+// remove every edge under the drawn path; orphan nodes are swept (building
+// nodes stay so homes/works remain re-connectable). Returns freed tiles.
+export function demolishRoad(state, cells) {
+  const { doomed, freed } = demolishTargets(state, cells);
+  for (const id of doomed) {
+    const e = state.roadEdges.get(id);
+    if (e) removeRoadEdge(state, e);
+  }
+  for (const n of [...state.roadNodes.values()]) {
+    if (n.bid == null && n.edges.length === 0) state.roadNodes.delete(n.id);
+  }
+  return freed;
 }
 
 // a building that activates on top of an existing road joins the network via

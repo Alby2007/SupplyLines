@@ -49,7 +49,7 @@ html, body {
 /* anchors the canvas overlay bars to the canvas itself, not the window */
 #canvas-inner { position: relative; display: inline-block; }
 
-#subbar {
+#subbar, #roadbar {
   position: absolute;
   top: 16px; left: 16px;
   display: flex; gap: 6px;
@@ -59,7 +59,7 @@ html, body {
   box-shadow: 0 2px 12px rgba(0,0,0,0.18);
   user-select: none;
 }
-#subbar.hidden { display: none; }
+#subbar.hidden, #roadbar.hidden { display: none; }
 
 .hot.sub { width: 40px; height: 40px; border-radius: 9px; }
 
@@ -99,7 +99,7 @@ html, body {
   background: #f5f2ec;
   border-radius: 10px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.12);
-  cursor: crosshair;
+  cursor: grab; /* crosshair only while a build tool is armed */
 }
 
 #modal, #gameover {

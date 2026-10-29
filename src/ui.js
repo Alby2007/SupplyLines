@@ -64,6 +64,8 @@ export function initUI(state) {
     hotLine: document.getElementById('hot-line'),
     hotJunction: document.getElementById('hot-junction'),
     subbar: document.getElementById('subbar'),
+    hotBulldoze: document.getElementById('hot-bulldoze'),
+    roadbar: document.getElementById('roadbar'),
     hotRoadCount: document.getElementById('hot-road-count'),
     hotLineCount: document.getElementById('hot-line-count'),
     colors: document.getElementById('hud-colors'),
@@ -83,6 +85,9 @@ export function initUI(state) {
   // junction is a sub-tool of the line group: re-clicking falls back to 'line'
   el.hotJunction.addEventListener('click', () =>
     setTool(getTool() === 'junction' ? 'line' : 'junction'));
+  // bulldozer is a sub-tool of the road group: re-clicking falls back to 'road'
+  el.hotBulldoze.addEventListener('click', () =>
+    setTool(getTool() === 'bulldoze' ? 'road' : 'bulldoze'));
 }
 
 export function updateHUD(state) {
@@ -95,10 +100,13 @@ export function updateHUD(state) {
   el.s2.classList.toggle('on', state.speed === 2);
   const tool = getTool();
   const lineGroup = tool === 'line' || tool === 'junction';
+  const roadGroup = tool === 'road' || tool === 'bulldoze';
   el.hotLine.classList.toggle('on', lineGroup);
-  el.hotRoad.classList.toggle('on', tool === 'road');
+  el.hotRoad.classList.toggle('on', roadGroup);
   el.subbar.classList.toggle('hidden', !lineGroup);
+  el.roadbar.classList.toggle('hidden', !roadGroup);
   el.hotJunction.classList.toggle('on', tool === 'junction');
+  el.hotBulldoze.classList.toggle('on', tool === 'bulldoze');
   el.hotRoadCount.textContent = state.roadTiles;
   el.hotLineCount.textContent = state.maxLines - state.lines.size;
 

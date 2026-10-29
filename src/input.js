@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import { addLine, extendLine, endpointLines, addJunction, insertJunction, junctionPlacement, junctionCanJoin } from './networks.js';
 import { addTrain } from './vehicles.js';
-import { buildRoad, roadCellCost, nearestEdgePoint } from './roads.js';
+import { buildRoad, roadCellCost, nearestEdgePoint, demolishRoad } from './roads.js';
 import { dist } from './state.js';
 import { cellOf, cellsBetween, cellKey } from './grid.js';
 
@@ -9,7 +9,7 @@ const HIT_RADIUS = 22;
 
 let draft = null;      // line draft
 let roadDraft = null;  // road draft
-let tool = 'line';
+let tool = null;       // armed build tool — starts disarmed
 let canvasEl = null;
 let panDrag = null;    // {x, y} last client position while panning
 const camKeys = new Set();
@@ -89,13 +89,15 @@ export function initInput(canvas, state, toWorld) {
       return;
     }
 
-    if (tool === 'road') {
-      const s = snapPoint(state, p);
+    if (tool === 'road' || tool === 'bulldoze') {
+      const demolish = tool === 'bulldoze';
+      const s = demolish ? { x: p.x, y: p.y, anchored: false } : snapPoint(state, p);
       roadDraft = {
         cells: [cellOf(s)],
         startAnchored: s.anchored,
         endAnchored: s.anchored,
         cursor: p,
+        demolish,
       };
       canvas.setPointerCapture(e.pointerId);
       return;
@@ -131,7 +133,8 @@ export function initInput(canvas, state, toWorld) {
 
     if (roadDraft) {
       roadDraft.cursor = p;
-      const s = snapPoint(state, p);
+      // demolition traces raw cells — nothing needs anchoring
+      const s = roadDraft.demolish ? { x: p.x, y: p.y, anchored: false } : snapPoint(state, p);
       extendCells(roadDraft.cells, cellOf(s));
       roadDraft.endAnchored = s.anchored;
       return;
@@ -165,8 +168,14 @@ export function initInput(canvas, state, toWorld) {
     if (roadDraft) {
       const rd = roadDraft;
       roadDraft = null;
-      const s = snapPoint(state, rd.cursor);
+      const s = rd.demolish ? { x: rd.cursor.x, y: rd.cursor.y, anchored: false } : snapPoint(state, rd.cursor);
       extendCells(rd.cells, cellOf(s));
+      if (rd.demolish) {
+        // bulldozed tiles go back to the road inventory
+        const refund = demolishRoad(state, rd.cells);
+        state.roadTiles = Math.min(CONFIG.roads.tilesCap, state.roadTiles + refund);
+        return;
+      }
       const anchored = rd.startAnchored || s.anchored;
       if (anchored && rd.cells.length >= 2) {
         const cost = roadCellCost(state, rd.cells);
@@ -203,6 +212,7 @@ export function initInput(canvas, state, toWorld) {
     else if (k === 'l') setTool('line');
     else if (k === 'j') setTool('junction');
     else if (k === 'r') setTool('road');
+    else if (k === 'b') setTool('bulldoze');
     else if (e.key === 'Escape') { draft = null; roadDraft = null; }
   });
   window.addEventListener('keyup', (e) => camKeys.delete(e.key.toLowerCase()));

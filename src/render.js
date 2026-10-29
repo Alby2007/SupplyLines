@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import { trainPos, carPos } from './vehicles.js';
 import { congestFactor } from './routing.js';
-import { roadCellCost, slicePolyline, polyLen } from './roads.js';
+import { roadCellCost, slicePolyline, polyLen, demolishRefund } from './roads.js';
 import { linePts } from './networks.js';
 import { cellCenter, routePts } from './grid.js';
 
@@ -86,17 +86,18 @@ function drawGrid(ctx, cam, w, h, roadDraft) {
   for (let y = y0; y <= cam.y + h; y += CS) { ctx.moveTo(cam.x, y + 0.5); ctx.lineTo(cam.x + w, y + 0.5); }
   ctx.stroke();
 
-  // cells the current draft occupies
+  // cells the current draft occupies — red when bulldozing
   if (roadDraft?.cells?.length) {
-    ctx.fillStyle = 'rgba(60,55,45,0.08)';
+    const demo = roadDraft.demolish;
+    ctx.fillStyle = demo ? 'rgba(230,57,70,0.10)' : 'rgba(60,55,45,0.08)';
     for (const c of roadDraft.cells) {
       ctx.fillRect(c.cx * CS, c.cy * CS, CS, CS);
     }
     // highlighted head cell — the tile you're about to claim
     const head = roadDraft.cells[roadDraft.cells.length - 1];
-    ctx.fillStyle = 'rgba(60,55,45,0.18)';
+    ctx.fillStyle = demo ? 'rgba(230,57,70,0.22)' : 'rgba(60,55,45,0.18)';
     ctx.fillRect(head.cx * CS, head.cy * CS, CS, CS);
-    ctx.strokeStyle = 'rgba(60,55,45,0.4)';
+    ctx.strokeStyle = demo ? 'rgba(230,57,70,0.5)' : 'rgba(60,55,45,0.4)';
     ctx.lineWidth = 1.5;
     ctx.strokeRect(head.cx * CS + 0.5, head.cy * CS + 0.5, CS - 1, CS - 1);
   }
@@ -201,11 +202,12 @@ function drawRoads(ctx, state) {
 function drawRoadDraft(ctx, state, rd) {
   if (!rd.cells.length) return;
   const pts = rd.cells.map((c) => cellCenter(c.cx, c.cy));
-  const cost = roadCellCost(state, rd.cells);
-  const ok = cost <= state.roadTiles;
+  const demolish = rd.demolish;
+  const cost = demolish ? 0 : roadCellCost(state, rd.cells);
+  const ok = demolish || cost <= state.roadTiles;
   ctx.save();
   ctx.setLineDash([8, 6]);
-  ctx.strokeStyle = ok ? '#8a8a8a' : '#e63946';
+  ctx.strokeStyle = demolish ? '#e63946' : ok ? '#8a8a8a' : '#e63946';
   ctx.lineWidth = CONFIG.roads.width - 1;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -215,8 +217,14 @@ function drawRoadDraft(ctx, state, rd) {
   ctx.globalAlpha = 1;
   if (rd.cursor) {
     ctx.font = '12px system-ui, sans-serif';
-    ctx.fillStyle = ok ? '#555' : '#e63946';
-    ctx.fillText(`${cost} tiles`, rd.cursor.x + 12, rd.cursor.y - 8);
+    if (demolish) {
+      const refund = demolishRefund(state, rd.cells);
+      ctx.fillStyle = '#e63946';
+      if (refund > 0) ctx.fillText(`+${refund} tiles`, rd.cursor.x + 12, rd.cursor.y - 8);
+    } else {
+      ctx.fillStyle = ok ? '#555' : '#e63946';
+      ctx.fillText(`${cost} tiles`, rd.cursor.x + 12, rd.cursor.y - 8);
+    }
   }
   ctx.restore();
 }
