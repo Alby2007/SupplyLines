@@ -10,6 +10,21 @@ const OVERFLOW_REASONS = {
 };
 
 export function update(state, dt) {
+  // the first motorway and roundabout arrive once week 3 is done — more come
+  // from weekly picks (MM: they're the upgrade-menu road tools)
+  if (!state.motorwayGranted && state.week >= CONFIG.motorways.unlockWeek) {
+    state.motorwayGranted = true;
+    state.motorways = 1;
+  }
+  if (!state.roundaboutGranted && state.week >= CONFIG.roundabouts.unlockWeek) {
+    state.roundaboutGranted = true;
+    state.roundabouts = 1;
+  }
+  if (!state.trafficLightGranted && state.week >= CONFIG.trafficLights.unlockWeek) {
+    state.trafficLightGranted = true;
+    state.trafficLights = 1;
+  }
+
   let foodEra = false;
   for (const b of state.buildings.values()) {
     if (b.type === 'farm' && b.active) { foodEra = true; break; }

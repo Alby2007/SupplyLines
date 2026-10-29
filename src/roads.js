@@ -115,10 +115,31 @@ export function roadCellIndex(state) {
   if (state._cellIdx && state._cellIdxV === state.netVersion) return state._cellIdx;
   const idx = new Map();
   for (const e of state.roadEdges.values()) {
+    // motorways are elevated — they occupy no ground cells, so surface roads
+    // can pass underneath and drawn paths never try to join them mid-span
+    if (e.motorway) continue;
     for (const c of cellsAlongPolyline(e.pts)) {
       const k = cellKey(c);
       if (!idx.has(k)) idx.set(k, []);
       idx.get(k).push({ edgeId: e.id });
+    }
+  }
+  // roundabout islands are part of the road: interior cells point at the
+  // ring's arcs so paths ending inside the circle join it, and buildings
+  // can't spawn in the middle of one
+  for (const e of state.roadEdges.values()) {
+    const c = e.roundabout;
+    if (!c) continue;
+    const R = CONFIG.roundabouts.radius;
+    const c0 = cellOf(c);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const cc = cellCenter(c0.cx + dx, c0.cy + dy);
+        if (Math.hypot(cc.x - c.x, cc.y - c.y) >= R) continue;
+        const k = cellKey({ cx: c0.cx + dx, cy: c0.cy + dy });
+        if (!idx.has(k)) idx.set(k, []);
+        idx.get(k).push({ edgeId: e.id });
+      }
     }
   }
   state._cellIdx = idx;
@@ -148,6 +169,18 @@ export function roadCellCost(state, cells) {
   return cost;
 }
 
+// a split landing within snap of an edge endpoint should reuse that node —
+// otherwise every draw over the same corridor cuts a ~1px sliver, and the
+// slivers get re-split on the next draw: the road graph grows multiplicatively
+// per build instead of per new junction
+function nearEndpoint(state, e, p) {
+  const na = state.roadNodes.get(e.a);
+  if (na && dist(na, p) < CONFIG.roads.snap) return na;
+  const nb = state.roadNodes.get(e.b);
+  if (nb && dist(nb, p) < CONFIG.roads.snap) return nb;
+  return null;
+}
+
 // resolve a drawn endpoint to a road node: building > split edge > cell-center node
 export function anchorAt(state, p) {
   let bBest = null;
@@ -160,11 +193,12 @@ export function anchorAt(state, p) {
   if (bBest) return roadNodeForBuilding(state, bBest);
 
   const ne = nearestEdgePoint(state, p);
-  if (ne && ne.d <= CONFIG.roads.snap && ne.t > 0.01 && ne.t < 0.99) {
-    return state.roadNodes.get(splitEdgeMulti(state, ne.edge, [ne.t]).nodeIds[1]);
-  }
   if (ne && ne.d <= CONFIG.roads.snap) {
-    // near an endpoint — reuse it rather than splitting a stub
+    const near = nearEndpoint(state, ne.edge, ne);
+    if (near) return near;
+    if (ne.t > 0.01 && ne.t < 0.99) {
+      return state.roadNodes.get(splitEdgeMulti(state, ne.edge, [ne.t]).nodeIds[1]);
+    }
     const n = ne.t <= 0.5 ? ne.edge.a : ne.edge.b;
     return state.roadNodes.get(n);
   }
@@ -190,10 +224,19 @@ export function splitEdgeMulti(state, e, ts) {
   chunks.push(slicePolyline(e.pts, prev, 1));
   removeRoadEdge(state, e);
   const newEdges = [];
+  const child = (aId, bId, pts) => {
+    const ne = addRoadEdge(state, aId, bId, pts);
+    // split chunks inherit the parent's behaviour — a one-way ring arc must
+    // stay one-way through every join or circulation breaks
+    if (e.oneway) ne.oneway = true;
+    if (e.roundabout) ne.roundabout = e.roundabout;
+    if (e.motorway) ne.motorway = true;
+    return ne;
+  };
   for (let i = 0; i < chunks.length; i++) {
     if (nodeIds[i] === nodeIds[i + 1]) continue;
     if (chunks[i].length >= 2 && polyLen(chunks[i]) > 0) {
-      newEdges.push(addRoadEdge(state, nodeIds[i], nodeIds[i + 1], chunks[i]));
+      newEdges.push(child(nodeIds[i], nodeIds[i + 1], chunks[i]));
       continue;
     }
     // degenerate slice between distinct coincident nodes — stub them together
@@ -201,7 +244,7 @@ export function splitEdgeMulti(state, e, ts) {
     const na = state.roadNodes.get(nodeIds[i]);
     const nb = state.roadNodes.get(nodeIds[i + 1]);
     if (na && nb) {
-      newEdges.push(addRoadEdge(state, nodeIds[i], nodeIds[i + 1], [{ x: na.x, y: na.y }, { x: nb.x, y: nb.y }]));
+      newEdges.push(child(nodeIds[i], nodeIds[i + 1], [{ x: na.x, y: na.y }, { x: nb.x, y: nb.y }]));
     }
   }
   return { nodeIds, newEdges };
@@ -251,6 +294,9 @@ export function buildRoad(state, cells) {
       const np = nearestOnPolyline(e.pts, center);
       if (np.d > CONFIG.grid.cell * 0.6) continue;
       if (np.t < 0.02 || np.t > 0.98) continue; // endpoint-touch → node pass handles
+      // a touch right at an existing node joins through it, not by cutting a
+      // sliver — without this, redrawing the same corridor re-splits slivers
+      if (nearEndpoint(state, e, np)) continue;
       if (!perEdge.has(e.id)) perEdge.set(e.id, []);
       perEdge.get(e.id).push({ tEdge: np.t, tNew: cellT[i] });
     }
@@ -278,6 +324,7 @@ export function buildRoad(state, cells) {
   // geometric crossings → fallback for diagonals sharing no cell
   const crosses = [];
   for (const e of [...state.roadEdges.values()]) {
+    if (e.motorway) continue; // surface roads pass under the overpass
     for (const h of polylineIntersections(pts, e.pts)) {
       if (h.tA < 0.02 || h.tA > 0.98 || h.tB < 0.02 || h.tB > 0.98) continue;
       const cross = { tNew: h.tA, edgeId: e.id, nodeId: null };
@@ -351,10 +398,27 @@ function demolishTargets(state, cells) {
   for (const k of cellSet) {
     for (const occ of idx.get(k) ?? []) doomed.add(occ.edgeId);
   }
+  // a roundabout is one piece of kit — touching any arc dooms the whole ring
+  for (const id of [...doomed]) {
+    const e = state.roadEdges.get(id);
+    if (!e?.roundabout) continue;
+    for (const o of state.roadEdges.values()) {
+      if (
+        o.roundabout &&
+        o.roundabout.x === e.roundabout.x &&
+        o.roundabout.y === e.roundabout.y
+      ) {
+        doomed.add(o.id);
+      }
+    }
+  }
   const freed = new Set();
   for (const id of doomed) {
     const e = state.roadEdges.get(id);
-    if (e) for (const c of cellsAlongPolyline(e.pts)) freed.add(cellKey(c));
+    // ring cells refund nothing — the roundabout cost an item, not tiles
+    if (e && !e.roundabout) {
+      for (const c of cellsAlongPolyline(e.pts)) freed.add(cellKey(c));
+    }
   }
   // a freed cell stays road if a surviving edge still covers it
   for (const e of state.roadEdges.values()) {
@@ -377,8 +441,21 @@ export function demolishRoad(state, cells) {
     const e = state.roadEdges.get(id);
     if (e) removeRoadEdge(state, e);
   }
+  // motorways fly over the drag's cells — a touch anywhere kills the whole
+  // span and returns the item (MM: deleted motorways go back in your menu)
+  for (const id of motorwaysUnder(state, cells)) {
+    const e = state.roadEdges.get(id);
+    if (e) removeRoadEdge(state, e);
+    state.motorways = Math.min(CONFIG.motorways.cap, state.motorways + 1);
+  }
   for (const n of [...state.roadNodes.values()]) {
-    if (n.bid == null && n.edges.length === 0) state.roadNodes.delete(n.id);
+    if (n.bid == null && n.edges.length === 0) {
+      // a lit junction that loses all its roads refunds the light
+      if (n.light) {
+        state.trafficLights = Math.min(CONFIG.trafficLights.cap, state.trafficLights + 1);
+      }
+      state.roadNodes.delete(n.id);
+    }
   }
   return freed;
 }
@@ -391,6 +468,7 @@ export function connectBuildingToRoad(state, b) {
   const own = new Set(buildingCells(b).map(cellKey));
   let best = null;
   for (const e of state.roadEdges.values()) {
+    if (e.motorway) continue; // a building under the overpass isn't served by it
     const touches = cellsAlongPolyline(e.pts).some((c) => own.has(cellKey(c)));
     const np = nearestOnPolyline(e.pts, b);
     if (!touches && np.d > connectRadius(b)) continue;
@@ -404,4 +482,306 @@ export function connectBuildingToRoad(state, b) {
   else jn = state.roadNodes.get(splitEdgeMulti(state, best.e, [best.t]).nodeIds[1]);
   if (!jn) return;
   addRoadEdge(state, jn.id, bn.id, [{ x: jn.x, y: jn.y }, { x: bn.x, y: bn.y }]);
+}
+
+// ---- motorways (elevated express edges — MM-style overpasses) ----
+
+// a motorway endpoint must land ON the existing network — building > node >
+// split edge. Unlike anchorAt there is no free-point fallback: both ends of
+// a span need a landing or it can't be built.
+export function motorwayAnchor(state, p) {
+  let bBest = null;
+  let bD = CONFIG.roads.snap;
+  for (const b of state.buildings.values()) {
+    if (!b.active || b.type === 'junction') continue;
+    const d = dist(b, p);
+    if (d < bD) { bD = d; bBest = b; }
+  }
+  if (bBest) return roadNodeForBuilding(state, bBest);
+
+  // any existing node — covers motorway ends, so spans can chain end-to-end
+  let nBest = null;
+  let nD = CONFIG.roads.snap;
+  for (const n of state.roadNodes.values()) {
+    const d = dist(n, p);
+    if (d < nD) { nD = d; nBest = n; }
+  }
+  if (nBest) return nBest;
+
+  const ne = nearestEdgePoint(state, p);
+  if (ne && ne.d <= CONFIG.roads.snap) {
+    const near = nearEndpoint(state, ne.edge, ne);
+    if (near) return near;
+    if (ne.t > 0.01 && ne.t < 0.99) {
+      return state.roadNodes.get(splitEdgeMulti(state, ne.edge, [ne.t]).nodeIds[1]);
+    }
+    return state.roadNodes.get(ne.t <= 0.5 ? ne.edge.a : ne.edge.b);
+  }
+  return null;
+}
+
+// one elevated edge between two anchored ends — free-form pts, no cells, no
+// crossing joins: the span passes OVER the surface network.
+export function buildMotorway(state, pts) {
+  if (!pts || pts.length < 2) return null;
+  const a = motorwayAnchor(state, pts[0]);
+  const b = motorwayAnchor(state, pts[pts.length - 1]);
+  if (!a || !b || a.id === b.id) return null;
+  pts[0] = { x: a.x, y: a.y };
+  pts[pts.length - 1] = { x: b.x, y: b.y };
+  const e = addRoadEdge(state, a.id, b.id, pts);
+  e.motorway = true;
+  return e;
+}
+
+// motorway edge ids a bulldozer drag touches — the whole span dies at once
+export function motorwaysUnder(state, cells) {
+  const cellSet = new Set(cells.map(cellKey));
+  const hit = new Set();
+  for (const e of state.roadEdges.values()) {
+    if (!e.motorway) continue;
+    if (cellsAlongPolyline(e.pts).some((c) => cellSet.has(cellKey(c)))) hit.add(e.id);
+  }
+  return hit;
+}
+
+// ---- roundabouts (MM-style free-flow junction replacement) ----
+
+// buildings that reject a drop — a roundabout can't sit on top of one
+function roundaboutBlockedByBuilding(state, p) {
+  const R = CONFIG.roundabouts.radius;
+  for (const b of state.buildings.values()) {
+    if (!b.active || b.type === 'junction') continue;
+    const rad = R +
+      (b.type === 'work' ? CONFIG.buildings.workRadius
+        : b.type === 'home' ? CONFIG.buildings.homeRadius
+        : CONFIG.buildings.radius);
+    if (dist(b, p) < rad) return true;
+  }
+  return false;
+}
+
+// a standalone ring on open ground — roads drawn to it later join its arcs
+// like any other road (shared cells / endpoint splits)
+function stampRing(state, x, y) {
+  const R = CONFIG.roundabouts.radius;
+  const K = 8;
+  const ring = [];
+  for (let i = 0; i < K; i++) {
+    const t = (i / K) * Math.PI * 2;
+    ring.push({ ang: t, node: addRoadNode(state, x + R * Math.cos(t), y + R * Math.sin(t)) });
+  }
+  const edges = [];
+  for (let i = 0; i < K; i++) {
+    const a = ring[i];
+    const b2 = ring[(i - 1 + K) % K];
+    const e = addRoadEdge(state, a.node.id, b2.node.id, arcPts(x, y, R, a.ang, b2.ang));
+    e.oneway = true;
+    e.roundabout = { x, y };
+    edges.push(e);
+  }
+  return edges;
+}
+
+// stamp a roundabout anywhere: dropped on a junction it replaces the node;
+// on a road the road splits into the ring; on open ground it's a standalone
+// ring that roads connect to as normal. Returns truthy when placed.
+export function placeRoundabout(state, p) {
+  if (roundaboutBlockedByBuilding(state, p)) return null;
+  const R = CONFIG.roundabouts.radius;
+  const ne = nearestEdgePoint(state, p, R);
+  if (ne?.edge.roundabout) return null; // no stacking roundabouts
+  if (ne) {
+    const node = ne.t > 0.02 && ne.t < 0.98
+      ? state.roadNodes.get(splitEdgeMulti(state, ne.edge, [ne.t]).nodeIds[1])
+      : state.roadNodes.get(ne.t <= 0.5 ? ne.edge.a : ne.edge.b);
+    return buildRoundabout(state, node);
+  }
+  const c = snapPosToCell(p); // rings centre on the grid, like MM
+  return stampRing(state, c.x, c.y);
+}
+
+// ghost preview under the cursor — where the ring would land and whether the
+// drop is legal ({x, y, ok})
+export function roundaboutGhost(state, p) {
+  if (roundaboutBlockedByBuilding(state, p)) return { x: p.x, y: p.y, ok: false };
+  const R = CONFIG.roundabouts.radius;
+  const ne = nearestEdgePoint(state, p, R);
+  if (ne) return { x: ne.x, y: ne.y, ok: !ne.edge.roundabout };
+  const c = snapPosToCell(p);
+  return { x: c.x, y: c.y, ok: true };
+}
+
+// ---- traffic lights (MM-style junction phase controller) ----
+
+// a lightable junction: pure node, ≥3 arms, not part of a roundabout ring
+// (lights on a ring would stop circulating traffic — the ring IS the fix)
+export function lightableNode(state, p, radius = CONFIG.roads.snap) {
+  let best = null;
+  for (const n of state.roadNodes.values()) {
+    if (n.bid != null || n.edges.length < 3 || n.light) continue;
+    if (n.edges.some((id) => state.roadEdges.get(id)?.roundabout)) continue;
+    const d = dist(n, p);
+    if (d <= radius && (!best || d < best.d)) best = { n, d };
+  }
+  return best?.n ?? null;
+}
+
+// group a node's incident edges into light phases: arms pointing ~opposite
+// share a green (N-S together, E-W together) — like the MM junction dots
+export function lightGroups(state, node) {
+  const arms = [];
+  for (const eid of node.edges) {
+    const e = state.roadEdges.get(eid);
+    if (!e) continue;
+    const atA = e.a === node.id;
+    const pen = atA ? e.pts[1] : e.pts[e.pts.length - 2];
+    if (!pen) continue;
+    arms.push({ eid, ang: Math.atan2(pen.y - node.y, pen.x - node.x) });
+  }
+  arms.sort((a, b) => a.ang - b.ang);
+  const groups = [];
+  const used = new Set();
+  for (const a of arms) {
+    if (used.has(a.eid)) continue;
+    const g = [a.eid];
+    used.add(a.eid);
+    for (const b of arms) {
+      if (used.has(b.eid)) continue;
+      let d = Math.abs(a.ang - b.ang) % (Math.PI * 2);
+      if (d > Math.PI) d = Math.PI * 2 - d;
+      if (Math.abs(d - Math.PI) < 0.55) { g.push(b.eid); used.add(b.eid); break; }
+    }
+    groups.push(g);
+  }
+  return groups;
+}
+
+// click a junction → install a light; click a lit junction → remove it.
+// `canAdd` gates installs on item stock (removal is always free).
+// Returns 'add' | 'remove' | null so the caller can adjust the item count.
+export function placeTrafficLight(state, p, canAdd = true) {
+  const lit = (() => {
+    let best = null;
+    for (const n of state.roadNodes.values()) {
+      if (!n.light) continue;
+      const d = dist(n, p);
+      if (d <= CONFIG.roads.snap && (!best || d < best.d)) best = { n, d };
+    }
+    return best?.n ?? null;
+  })();
+  if (lit) {
+    delete lit.light;
+    return 'remove';
+  }
+  const n = lightableNode(state, p);
+  if (!n || !canAdd) return null;
+  n.light = {
+    groups: lightGroups(state, n),
+    idx: 0,
+    t: CONFIG.trafficLights.phase,
+    edgeCount: n.edges.length,
+  };
+  return 'add';
+}
+
+// ghost preview: {x, y, ok} — snaps to the junction or existing light
+export function trafficLightGhost(state, p) {
+  for (const n of state.roadNodes.values()) {
+    const d = dist(n, p);
+    if (d > CONFIG.roads.snap) continue;
+    if (n.light) return { x: n.x, y: n.y, ok: true };
+    if (
+      n.bid == null &&
+      n.edges.length >= 3 &&
+      !n.edges.some((id) => state.roadEdges.get(id)?.roundabout)
+    ) {
+      return { x: n.x, y: n.y, ok: true };
+    }
+    return { x: n.x, y: n.y, ok: false };
+  }
+  return { x: p.x, y: p.y, ok: false };
+}
+
+// arc from angle a0 down to a1 — decreasing angle = counterclockwise on
+// screen (y is down), i.e. right-hand traffic circulation
+function arcPts(cx, cy, r, a0, a1) {
+  let sweep = a0 - a1;
+  while (sweep <= 0) sweep += Math.PI * 2;
+  const n = Math.max(2, Math.ceil(sweep / (Math.PI / 6)));
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = a0 - (sweep * i) / n;
+    pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
+  }
+  return pts;
+}
+
+// swap a junction node for a one-way ring: each incident edge re-points to a
+// ring node along its own approach ray, and the ring circulates
+// counterclockwise. Entering cars yield at their entry node; circulating
+// cars never stop inside — the MM fix for a congested crossing.
+export function buildRoundabout(state, node) {
+  if (!node || node.bid != null || node.edges.length < 2) return null;
+  const R = CONFIG.roundabouts.radius;
+
+  // direction each incident edge extends AWAY from the junction
+  const spokes = [];
+  for (const eid of node.edges) {
+    const e = state.roadEdges.get(eid);
+    if (!e) continue;
+    const atA = e.a === node.id;
+    const pen = atA ? e.pts[1] : e.pts[e.pts.length - 2];
+    if (!pen) continue;
+    spokes.push({ e, atA, ang: Math.atan2(pen.y - node.y, pen.x - node.x) });
+  }
+  spokes.sort((a, b) => a.ang - b.ang);
+
+  // one ring node per spoke; near-parallel arrivals share one
+  const ring = [];
+  const spokeNode = [];
+  for (const s of spokes) {
+    const last = ring[ring.length - 1];
+    if (last && s.ang - last.ang < 0.35) {
+      spokeNode.push(last.node);
+      continue;
+    }
+    const n = addRoadNode(state, node.x + R * Math.cos(s.ang), node.y + R * Math.sin(s.ang));
+    ring.push({ ang: s.ang, node: n });
+    spokeNode.push(n);
+  }
+  if (ring.length < 2) return null;
+
+  for (let i = 0; i < spokes.length; i++) {
+    const { e, atA } = spokes[i];
+    const rn = spokeNode[i];
+    if (atA) { e.a = rn.id; e.pts[0] = { x: rn.x, y: rn.y }; }
+    else { e.b = rn.id; e.pts[e.pts.length - 1] = { x: rn.x, y: rn.y }; }
+    rn.edges.push(e.id);
+  }
+  node.edges = [];
+
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b2 = ring[(i - 1 + ring.length) % ring.length];
+    const e = addRoadEdge(state, a.node.id, b2.node.id, arcPts(node.x, node.y, R, a.ang, b2.ang));
+    e.oneway = true;              // graph only routes a→b — no wrong-way rings
+    e.roundabout = { x: node.x, y: node.y }; // island centre for rendering
+  }
+
+  // legs routed through the dead node recompute on their next retry
+  const dead = `r${node.id}`;
+  for (const a of state.agents.values()) {
+    if (a.legs?.some((l) => l.nodes?.includes(dead))) {
+      a.legs = null;
+      a.retryT = 0;
+    }
+  }
+  // a light on the consumed junction goes back to the player's stock
+  if (node.light) {
+    state.trafficLights = Math.min(CONFIG.trafficLights.cap, state.trafficLights + 1);
+  }
+  state.roadNodes.delete(node.id);
+  state.netVersion++;
+  return true;
 }

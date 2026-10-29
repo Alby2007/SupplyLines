@@ -57,17 +57,40 @@ export const CONFIG = {
     tilesPerWeek: 18,       // road budget granted each week
     tilesCap: 99,
   },
+  motorways: {
+    // MM motorways: elevated free-form spans that hop over the surface
+    // network — cost zero tiles, capped as a countable item
+    speedFactor: 1.6,       // × car speed while on the elevated edge
+    unlockWeek: 4,          // first one granted once week 3 is done
+    cap: 9,                 // MM parity — the game stops offering them at 9
+    width: 18,              // px — chunkier than surface roads
+  },
+  roundabouts: {
+    // MM roundabouts: swap a junction node for a one-way circulating ring —
+    // entering cars yield once, circulating cars never stop inside
+    unlockWeek: 4,          // first one granted once week 3 is done
+    cap: 9,
+    radius: 17,             // px — ring centre to ring nodes
+  },
+  trafficLights: {
+    // MM traffic lights: a junction cycles green phases between arm groups —
+    // red arms hold unconditionally, so a dominant road can't starve a side
+    // road the way yield-to-occupied does
+    unlockWeek: 4,
+    cap: 9,
+    phase: 2.2,             // seconds each arm group holds the green
+  },
   food: {
-    produceInterval: 6,     // seconds per crate at a staffed farm
+    produceInterval: 4,     // seconds per crate at a staffed farm
     workersNeeded: 2,       // workers on-site to fully staff a farm/market
-    shiftLen: 75,           // seconds an arrived worker stays on-shift
+    shiftLen: 120,          // seconds an arrived worker stays on-shift
     stockpileCap: 10,
     hungerLimit: 90,        // seconds a home can go unfed
     pantryStart: 30,        // new homes spawn with this much food buffer
     hungryAt: 20,           // dispatch ignores homes hungrier than this ago only below threshold
     marketTrucksStart: 3,   // milkman trucks per market
     marketServeCap: 5,      // homes a market can handle per truck
-    milkCap: 3,             // deliveries per milkman run
+    milkCap: 4,             // deliveries per milkman run
     crateCap: 4,            // crates per cargo wagon
     dispatchInterval: 2,    // seconds between market dispatch checks
     assignInterval: 3,      // seconds between home→market reassignment
@@ -82,8 +105,8 @@ export const CONFIG = {
     relief: 18,         // seconds of demand each arriving worker clears
     limit: 90,          // meter full → game over
     grace: 15,          // new workplaces start with this much slack
-    growth: 0.5,        // extra demand rate per level — L3 = 1 + 2×0.5 = 2× rate
-    promoteEvery: 8,    // worker arrivals per level — a work upgrades as it's served
+    growth: 0.3,        // extra demand rate per level — L3 = 1 + 2×0.3 = 1.6× rate
+    promoteEvery: 14,   // worker arrivals per level — a work upgrades as it's served
     maxLevel: 3,
   },
   overflowLimit: 25,        // seconds at/over capacity before game over

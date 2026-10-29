@@ -78,11 +78,14 @@ export function buildGraph(state, modes = null) {
     const na = state.roadNodes.get(e.a);
     const nb = state.roadNodes.get(e.b);
     if (!na || !nb) continue;
-    const cost = edgeLength(e) / Math.max(10, CONFIG.roads.carSpeed * congestFactor(state, e));
+    // motorways are the express option — same congestion model, faster cruise
+    const spd = CONFIG.roads.carSpeed * (e.motorway ? CONFIG.motorways.speedFactor : 1);
+    const cost = edgeLength(e) / Math.max(10, spd * congestFactor(state, e));
     const ka = roadNodeKey(na);
     const kb = roadNodeKey(nb);
     adj.get(ka).push({ to: kb, cost, mode: 'road', edgeId: e.id });
-    adj.get(kb).push({ to: ka, cost, mode: 'road', edgeId: e.id });
+    // one-way edges (roundabout rings) only route in their built direction
+    if (!e.oneway) adj.get(kb).push({ to: ka, cost, mode: 'road', edgeId: e.id });
   }
 
   return { nodes, adj };

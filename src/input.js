@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import { addLine, extendLine, endpointLines, addJunction, insertJunction, junctionPlacement, junctionCanJoin, demolishLines } from './networks.js';
 import { addTrain, awardConnectionTrains } from './vehicles.js';
-import { buildRoad, roadCellCost, nearestEdgePoint, demolishRoad } from './roads.js';
+import { buildRoad, roadCellCost, nearestEdgePoint, demolishRoad, buildMotorway, placeRoundabout, roundaboutGhost, placeTrafficLight, trafficLightGhost } from './roads.js';
 import { dist } from './state.js';
 import { cellOf, cellsBetween, cellKey, clampCell } from './grid.js';
 
@@ -14,6 +14,7 @@ let canvasEl = null;
 let panDrag = null;    // {x, y} last client position while panning
 const camKeys = new Set();
 
+let hover = null; // {x, y} valid placement under the cursor (ghost previews)
 const clampCam = (state) => {
   state.camera.x = Math.max(0, Math.min(CONFIG.map.width - CONFIG.view.width, state.camera.x));
   state.camera.y = Math.max(0, Math.min(CONFIG.map.height - CONFIG.view.height, state.camera.y));
@@ -32,10 +33,12 @@ export function updateCamera(state, dt) {
 export const getDraft = () => draft;
 export const getRoadDraft = () => roadDraft;
 export const getTool = () => tool;
+export const getHover = () => hover;
 export function setTool(t) {
   tool = tool === t ? null : t; // re-clicking the armed tool disarms it
   draft = null;
   roadDraft = null;
+  hover = null;
   if (canvasEl) canvasEl.style.cursor = tool == null ? 'grab' : 'crosshair';
 }
 
@@ -50,10 +53,15 @@ export function hitBuilding(state, p) {
   return best;
 }
 
-// read-only endpoint snap: building > existing road > free point
+// read-only endpoint snap: building > node > existing road > free point.
+// The node pass matters for motorway ends — spans register no cells, so
+// nearestEdgePoint can't see them and chains would fail to anchor.
 function snapPoint(state, p) {
   const b = hitBuilding(state, p);
   if (b && b.active && b.type !== 'junction') return { x: b.x, y: b.y, anchored: true };
+  for (const n of state.roadNodes.values()) {
+    if (dist(n, p) <= CONFIG.roads.snap) return { x: n.x, y: n.y, anchored: true };
+  }
   const ne = nearestEdgePoint(state, p);
   if (ne && ne.d <= CONFIG.roads.snap) return { x: ne.x, y: ne.y, anchored: true };
   return { x: p.x, y: p.y, anchored: false };
@@ -89,6 +97,40 @@ export function initInput(canvas, state, toWorld) {
         const j = addJunction(state, pl.x, pl.y, pl.line.color);
         insertJunction(state, j, pl.line, pl.segIdx);
       }
+      return;
+    }
+
+    // roundabouts stamp instantly anywhere — on a junction, on a road, or
+    // on open ground for roads to join later
+    if (tool === 'roundabout') {
+      if (state.roundabouts > 0 && placeRoundabout(state, p)) state.roundabouts--;
+      return;
+    }
+
+    // traffic lights toggle on junctions: click installs, click again pulls
+    if (tool === 'light') {
+      const r = placeTrafficLight(state, p, state.trafficLights > 0);
+      if (r === 'add') state.trafficLights--;
+      else if (r === 'remove') {
+        state.trafficLights = Math.min(CONFIG.trafficLights.cap, state.trafficLights + 1);
+      }
+      return;
+    }
+
+    // motorways draw free-form: the start must land on the existing network,
+    // then the span can sweep over anything until it finds a second landing
+    if (tool === 'motorway') {
+      if (state.motorways <= 0) return;
+      const s = snapPoint(state, p);
+      if (!s.anchored) return;
+      roadDraft = {
+        motor: true,
+        pts: [{ x: s.x, y: s.y }],
+        tail: { x: s.x, y: s.y },
+        cursor: p,
+        endAnchored: false,
+      };
+      canvas.setPointerCapture(e.pointerId);
       return;
     }
 
@@ -136,8 +178,25 @@ export function initInput(canvas, state, toWorld) {
     }
     const p = toWorld(e);
 
+    // armed-click tools get a live placement ghost under the cursor
+    hover = tool === 'roundabout' && !roadDraft && !draft
+      ? roundaboutGhost(state, p)
+      : tool === 'light' && !roadDraft && !draft
+        ? trafficLightGhost(state, p)
+        : null;
+
     if (roadDraft) {
       roadDraft.cursor = p;
+      if (roadDraft.motor) {
+        // free-form trail (decimated); the tail snaps only when it can land
+        const s = snapPoint(state, p);
+        const tip = s.anchored ? { x: s.x, y: s.y } : { x: p.x, y: p.y };
+        const last = roadDraft.pts[roadDraft.pts.length - 1];
+        if (dist(last, tip) > 16) roadDraft.pts.push(tip);
+        roadDraft.tail = tip;
+        roadDraft.endAnchored = s.anchored;
+        return;
+      }
       // demolition traces raw cells — nothing needs anchoring
       const s = roadDraft.demolish ? { x: p.x, y: p.y, anchored: false } : snapPoint(state, p);
       extendCells(roadDraft.cells, cellOf(s));
@@ -185,6 +244,14 @@ export function initInput(canvas, state, toWorld) {
       const rd = roadDraft;
       roadDraft = null;
       const s = rd.demolish ? { x: rd.cursor.x, y: rd.cursor.y, anchored: false } : snapPoint(state, rd.cursor);
+      if (rd.motor) {
+        // a span only exists if the far end landed — one item per placement
+        if (s.anchored && state.motorways > 0) {
+          const pts = [...rd.pts, { x: s.x, y: s.y }];
+          if (buildMotorway(state, pts)) state.motorways--;
+        }
+        return;
+      }
       extendCells(rd.cells, cellOf(s));
       if (rd.demolish) {
         // bulldozed tiles go back to the road inventory; lines under the
@@ -228,6 +295,12 @@ export function initInput(canvas, state, toWorld) {
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
+    // while the pause menu is up, Escape is the only live key — close + resume
+    if (state.pauseMenu) {
+      if (e.key === 'Escape' && !e.repeat) { state.pauseMenu = false; state.paused = false; }
+      e.preventDefault();
+      return;
+    }
     if (['w', 'a', 's', 'd'].includes(k) || k.startsWith('arrow')) {
       camKeys.add(k);
       e.preventDefault();
@@ -241,7 +314,17 @@ export function initInput(canvas, state, toWorld) {
     else if (k === 'j') setTool('junction');
     else if (k === 'r') setTool('road');
     else if (k === 'b') setTool('bulldoze');
-    else if (e.key === 'Escape') { draft = null; roadDraft = null; }
+    else if (k === 'm' && state.motorways > 0) setTool('motorway');
+    else if (k === 'o' && state.roundabouts > 0) setTool('roundabout');
+    else if (k === 't' && state.trafficLights > 0) setTool('light');
+    else if (e.key === 'Escape') {
+      // draft cancels first; a second Escape opens the pause menu
+      if (draft || roadDraft) { draft = null; roadDraft = null; }
+      else if (!state.upgradePending && !state.gameOver) {
+        state.pauseMenu = true;
+        state.paused = true;
+      }
+    }
   });
   window.addEventListener('keyup', (e) => camKeys.delete(e.key.toLowerCase()));
   window.addEventListener('blur', () => camKeys.clear());

@@ -68,14 +68,44 @@ function tryDispatch(state, m) {
   // market staff are the truck drivers — each worker means one more truck
   // that can be on the road, so a short-staffed market still delivers, slower
   if ((m.activeTrucks || 0) >= Math.min(m.trucks, m.workers.length)) return;
-  const targets = hungryAssigned(state, m.id);
+  // homes already on a truck's route are covered — the next truck spreads to
+  // whoever is left, so multiple trucks take distinct routes
+  const covered = new Set();
+  for (const v of state.vehicles.values()) {
+    if (v.kind === 'milkTruck' && v.market === m.id) {
+      for (const t of v.targets) covered.add(t);
+    }
+  }
+  const targets = hungryAssigned(state, m.id).filter((id) => !covered.has(id));
   if (!targets.length) return;
   const load = Math.min(m.stock, CONFIG.food.milkCap, targets.length);
-  const truck = spawnMilkTruck(state, m, load, targets.slice(0, load));
+  const truck = spawnMilkTruck(state, m, load, routeOrder(state, m, targets.slice(0, load)));
   if (truck) {
     m.stock -= load;
     m.activeTrucks = (m.activeTrucks || 0) + 1;
   }
+}
+
+// greedy nearest-neighbour ordering of a truck's drops from the market —
+// hunger order zigzags, proximity keeps each run short so it covers more
+function routeOrder(state, market, bids) {
+  const out = [];
+  const left = [...bids];
+  let from = market;
+  while (left.length) {
+    let bi = 0;
+    let bd = Infinity;
+    for (let i = 0; i < left.length; i++) {
+      const h = state.buildings.get(left[i]);
+      const d = h ? Math.abs(h.x - from.x) + Math.abs(h.y - from.y) : Infinity;
+      if (d < bd) { bd = d; bi = i; }
+    }
+    const h = state.buildings.get(left.splice(bi, 1)[0]);
+    if (!h) continue;
+    out.push(h.id);
+    from = h;
+  }
+  return out;
 }
 
 // assigned homes that are getting hungry, hungriest first

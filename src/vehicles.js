@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import { nid } from './state.js';
 import { roadNodeKey, nodePos, congestFactor, findPathTo } from './routing.js';
-import { polyLen, pointAtLen } from './roads.js';
+import { polyLen, pointAtLen, lightGroups } from './roads.js';
 import { lineSegPts, lineSegLen, linesThrough } from './networks.js';
 
 // Arrival resolution: crates stock markets; farm/market arrivals staff shifts;
@@ -215,10 +215,34 @@ function milkArrive(state, v) {
 
 export function update(state, dt) {
   state._tick = (state._tick ?? 0) + 1;
+  // traffic lights cycle their arm groups; a regroup covers roads drawn
+  // into the junction after installation
+  for (const n of state.roadNodes.values()) {
+    const L = n.light;
+    if (!L) continue;
+    if (n.edges.length !== L.edgeCount) {
+      L.groups = lightGroups(state, n);
+      L.edgeCount = n.edges.length;
+      L.idx %= Math.max(1, L.groups.length);
+    }
+    L.t -= dt;
+    if (L.t <= 0) {
+      L.idx = (L.idx + 1) % L.groups.length;
+      L.t = CONFIG.trafficLights.phase;
+    }
+  }
   for (const v of [...state.vehicles.values()]) {
     if (v.kind === 'train') updateTrain(state, v, dt);
     else updateRoadVeh(state, v, dt);
   }
+}
+
+// a car's approach edge has the green when its group is the live phase —
+// arms added after installation (not yet grouped) count as green so a new
+// spoke can never be red forever
+function armGreen(L, eid) {
+  const g = L.groups.findIndex((gr) => gr.includes(eid));
+  return g === -1 || g === L.idx;
 }
 
 // per-tick spatial buckets for junction-yield queries — positions are a
@@ -245,7 +269,7 @@ function updateRoadVeh(state, v, dt) {
   const seg = v.segs[v.seg];
   const e = seg?.edgeId != null ? state.roadEdges.get(seg.edgeId) : null;
   const base = v.kind === 'car' ? CONFIG.roads.carSpeed : CONFIG.roads.truckSpeed;
-  let d = base * (e ? congestFactor(state, e) : 1) * dt;
+  let d = base * (e ? congestFactor(state, e) : 1) * (e?.motorway ? CONFIG.motorways.speedFactor : 1) * dt;
 
   // ---- traffic: keep a gap behind the car ahead, yield at junctions ----
   v.yielding = false;
@@ -268,7 +292,23 @@ function updateRoadVeh(state, v, dt) {
     // Patience cap: a yielded car eventually noses in — without it a stopped
     // car parked in the box (follow-blocked, non-yielding) deadlocks everyone.
     const rem = seg.len - v.dist;
-    if (rem < T.yieldLookahead) {
+    // circulating ring edges never yield — only entry approaches do
+    if (rem < T.yieldLookahead && !e.roundabout) {
+      // a lit junction overrides the generic yield: green arms enter freely,
+      // red arms hold the stop line until their phase (or a full cycle of
+      // gridlock, same safety role as yieldPatience)
+      const endN = state.roadNodes.get(seg.fwd ? e.b : e.a);
+      const L = endN?.light;
+      if (L) {
+        if (armGreen(L, e.id)) {
+          v.yieldT = 0;
+        } else {
+          v.yielding = true;
+          v.yieldT = (v.yieldT || 0) + dt;
+          const waitCap = L.groups.length * CONFIG.trafficLights.phase + 1;
+          if (v.yieldT < waitCap) d = Math.min(d, Math.max(0, rem - 2));
+        }
+      } else {
       const node = seg.pts[seg.pts.length - 1];
       const B = T.junctionBox;
       const idx = yieldIndex(state);
@@ -289,6 +329,7 @@ function updateRoadVeh(state, v, dt) {
         if (v.yieldT < T.yieldPatience) d = Math.min(d, Math.max(0, rem - 2));
       } else {
         v.yieldT = 0;
+      }
       }
     } else {
       v.yieldT = 0;
@@ -334,11 +375,27 @@ export function carPos(v) {
 
 function arriveCar(state, v) {
   state.vehicles.delete(v.id);
+  // where the car physically ended — a building node when the route ends at a
+  // stop, a plain junction otherwise (riders who lost their legs mid-ride
+  // alight there and re-path from scratch)
+  const end = v.segs[v.segs.length - 1];
+  const ee = end?.edgeId != null ? state.roadEdges.get(end.edgeId) : null;
+  const endNode = ee ? state.roadNodes.get(end.fwd ? ee.b : ee.a) : null;
+  const endBid = endNode?.bid;
   // every passenger resolves their own leg — carpools alight together
   for (const aid of v.pax) {
     const a = state.agents.get(aid);
     if (!a) continue;
-    const leg = a.legs.shift();
+    const leg = a.legs?.shift();
+    if (!leg) {
+      // legs cleared mid-ride (a roundabout replaced a node on the route) —
+      // alight here and re-plan, never crash on the missing leg
+      a.loc = endBid ?? a.home;
+      a.retryT = 0;
+      a.pathV = -1;
+      state.buildings.get(a.loc)?.waiting.push(a.id);
+      continue;
+    }
     a.loc = leg.to;
     if (!a.legs.length) arrive(state, a, leg.to);
     else state.buildings.get(leg.to)?.waiting.push(a.id);

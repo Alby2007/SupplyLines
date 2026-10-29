@@ -11,15 +11,37 @@ import { spawnCar } from './vehicles.js';
 // Workers strongly prefer understaffed farms/markets over offices at any
 // distance — otherwise remote employers starve systematically.
 // Colour rules: markets require a matching colour; neutral farms take anyone.
-const understaffedFor = (color) => (b) =>
-  b.active &&
-  (b.type === 'farm' || (b.type === 'market' && b.color === color)) &&
-  b.workers.length < CONFIG.food.workersNeeded + 1;
+const understaffedFor = (color) => (b) => {
+  if (!b.active) return false;
+  // farm staff only produce — it needs exactly the requirement on site
+  if (b.type === 'farm') return b.workers.length < CONFIG.food.workersNeeded;
+  // market staff are truck drivers — it keeps attracting until every truck
+  // has a driver, otherwise a "+1 truck" upgrade can never take effect
+  if (b.type === 'market' && b.color === color) {
+    return b.workers.length < Math.min(b.trucks, CONFIG.food.workersNeeded * 2);
+  }
+  return false;
+};
 const officeFor = (color) => (b) =>
   b.active && b.type === 'work' && b.color === color;
 export const personDestFor = (color) => [understaffedFor(color), officeFor(color)];
 
 export const marketMatch = (b) => b.type === 'market' && b.active;
+
+// a market whose assigned homes are going hungry needs crates first — the
+// nearest-market rule funnels every crate into one market, which feeds only
+// its own colour and starves all the others. The stock check stops a busy
+// market hoarding crates it can't dispatch: below one truckload it still
+// pulls, at/above it the next-nearest needy market takes the crates.
+const hungryMarketMatch = (state) => (b) => {
+  if (b.type !== 'market' || !b.active || b.stock >= CONFIG.food.milkCap) return false;
+  for (const h of state.buildings.values()) {
+    if (h.type === 'home' && h.assignedMarket === b.id && h.hungerT > CONFIG.food.hungryAt) {
+      return true;
+    }
+  }
+  return false;
+};
 
 // who is out of which home / on shift at which building — one O(agents) scan
 // shared by every building in a step, instead of a scan per building
@@ -44,7 +66,8 @@ function crateMatchers(state, locBid) {
       if (b?.type === 'market') onLine.add(b.id);
     }
   }
-  return onLine.size ? [(b) => onLine.has(b.id), marketMatch] : [marketMatch];
+  const hungry = hungryMarketMatch(state);
+  return onLine.size ? [hungry, (b) => onLine.has(b.id), marketMatch] : [hungry, marketMatch];
 }
 
 export function spawnAgent(state, atBuilding, kind, dest) {
@@ -82,6 +105,12 @@ export function update(state, dt) {
     if (typeof a.loc !== 'number') continue; // riding a vehicle
     a.wait += dt;
     if (a.pathV !== state.netVersion) a.legs = null;
+    // crates queueing for a freight train while the farm backs up spill onto
+    // the road — rail capacity is per-train but trucks are unlimited
+    if (a.kind === 'crate' && a.legs?.[0]?.mode === 'line') {
+      const b = state.buildings.get(a.loc);
+      if (b && b.waiting.length >= b.capacity - 2) { a.legs = null; a.retryT = 0; }
+    }
     if (!a.legs) {
       a.retryT -= dt;
       if (a.retryT <= 0) {
@@ -90,11 +119,23 @@ export function update(state, dt) {
             ? crateMatchers(state, a.loc)
             : Array.isArray(a.dest) ? a.dest : [a.dest];
         // people ride lines of their own colour (never freight); crates
-        // only board freight trains — passenger cars won't take them
-        const opts = a.kind === 'person' ? { lineColor: a.color } : { freight: true };
-        for (const m of matchers) {
-          a.legs = findPath(state, a.loc, m, opts);
-          if (a.legs) break;
+        // only board freight trains — passenger cars won't take them, and a
+        // nearly-full farm queue sends crates by road first, falling back to
+        // rail only when no market is road-reachable
+        const farmQueue =
+          a.kind === 'crate'
+            ? (state.buildings.get(a.loc)?.waiting.length ?? 0)
+            : 0;
+        const optList = a.kind === 'person'
+          ? [{ lineColor: a.color }]
+          : farmQueue >= 4
+            ? [{ freight: true, modes: { line: false, road: true } }, { freight: true }]
+            : [{ freight: true }];
+        outer: for (const opts of optList) {
+          for (const m of matchers) {
+            a.legs = findPath(state, a.loc, m, opts);
+            if (a.legs) break outer;
+          }
         }
         a.pathV = state.netVersion;
         a.retryT = 2;

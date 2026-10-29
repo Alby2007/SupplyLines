@@ -2,7 +2,7 @@
 
 html, body {
   height: 100%;
-  background: #ece9e2;
+  background: #f5f2ec;
   font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   color: #333;
   overflow: hidden;
@@ -85,6 +85,8 @@ html, body {
 }
 .hot:hover { border-color: #b5afa3; background: #e5e1d8; }
 .hot.on { border-color: #457b9d; background: #e3ecf1; }
+.hot.hidden { display: none; }
+.hot.empty { opacity: 0.45; }
 
 .hot-badge {
   position: absolute; top: -8px; right: -8px;
@@ -96,34 +98,34 @@ html, body {
 }
 #game {
   display: block;
-  background: #f5f2ec;
+  background: #dce9cf;
   border-radius: 10px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.12);
   cursor: grab; /* crosshair only while a build tool is armed */
 }
 
-#modal, #gameover {
+#modal, #gameover, #pausemenu {
   position: fixed; inset: 0;
   background: rgba(40,40,40,0.35);
   display: flex; align-items: center; justify-content: center;
 }
-#modal.hidden, #gameover.hidden { display: none; }
+#modal.hidden, #gameover.hidden, #pausemenu.hidden { display: none; }
 
-#modal-card, #gameover-card {
+#modal-card, #gameover-card, #pause-card {
   background: #f5f2ec; border-radius: 12px;
   padding: 28px 32px; min-width: 320px;
   box-shadow: 0 6px 30px rgba(0,0,0,0.25);
   text-align: center;
 }
-#modal-card h2, #gameover-card h2 { margin-bottom: 18px; font-weight: 600; }
+#modal-card h2, #gameover-card h2, #pause-card h2 { margin-bottom: 18px; font-weight: 600; }
 
-#modal-options { display: flex; flex-direction: column; gap: 10px; }
-#modal-options button {
+#modal-options, #pause-options { display: flex; flex-direction: column; gap: 10px; }
+#modal-options button, #pause-options button {
   padding: 12px 18px; font-size: 15px;
   border: 2px solid #457b9d; background: transparent; color: #2a4a5e;
   border-radius: 8px; cursor: pointer;
 }
-#modal-options button:hover { background: #457b9d; color: #fff; }
+#modal-options button:hover, #pause-options button:hover { background: #457b9d; color: #fff; }
 
 #gameover-card button {
   margin-top: 14px; padding: 10px 22px; font-size: 15px;

@@ -39,6 +39,9 @@ export function snapPosToCell(p) {
 
 // 8-connected contiguous cell path a→b inclusive (Bresenham)
 export function cellsBetween(a, b) {
+  // a corrupt point must never hang the rasteriser — NaN makes the
+  // termination check (x !== b.cx) permanently false and OOMs the sim
+  if (![a.cx, a.cy, b.cx, b.cy].every(Number.isFinite)) return [];
   const cells = [];
   let x = a.cx;
   let y = a.cy;

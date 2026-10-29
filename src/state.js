@@ -16,6 +16,7 @@ export function createState() {
     freightDelivered: 0,
     gameOver: null,
     paused: false,
+    pauseMenu: false,
     speed: 1,
     upgradePending: false,
     netVersion: 0,          // bumped on any network edit; stale agent paths get recomputed
@@ -24,6 +25,12 @@ export function createState() {
     maxLines: CONFIG.lines.maxStart,
     roadTiles: CONFIG.roads.tilesStart,
     roadCapBonus: 0,
+    motorways: 0,           // countable item stock — each span placed spends 1
+    motorwayGranted: false, // first one arrives at CONFIG.motorways.unlockWeek
+    roundabouts: 0,
+    roundaboutGranted: false,
+    trafficLights: 0,
+    trafficLightGranted: false,
     camera: { x: 0, y: 0 },   // world-space top-left of the 640-tile viewport
     assignClock: CONFIG.food.assignInterval,
     spawnClock: CONFIG.spawn.intervalStart,

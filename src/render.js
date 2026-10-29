@@ -13,7 +13,7 @@ const ROAD_BUSY = '#e9a13b';
 const VEHICLE_COLORS = { car: '#4a4640', foodTruck: '#2a9d8f', milkTruck: '#f4f1ea' };
 const PAL = (i) => (i == null ? null : CONFIG.colors.palette[i]);
 
-export function draw(ctx, state, draft, roadDraft, tool, cam, w, h) {
+export function draw(ctx, state, draft, roadDraft, tool, cam, w, h, hover) {
   ctx.clearRect(0, 0, w, h);
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
@@ -28,12 +28,39 @@ export function draw(ctx, state, draft, roadDraft, tool, cam, w, h) {
   for (const line of state.lines.values()) drawLine(ctx, state, line);
   if (draft) drawDraft(ctx, state, draft);
   if (roadDraft) drawRoadDraft(ctx, state, roadDraft);
+  if (tool === 'roundabout' && hover) {
+    ctx.save();
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = hover.ok === false ? '#e63946' : '#457b9d';
+    ctx.lineWidth = CONFIG.roads.width - 2;
+    ctx.beginPath();
+    ctx.arc(hover.x, hover.y, CONFIG.roundabouts.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (tool === 'light' && hover) {
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = hover.ok === false ? '#e63946' : '#f5f2ec';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(hover.x, hover.y, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
   for (const v of state.vehicles.values()) {
     if (v.kind === 'train') drawTrain(ctx, state, v);
     else drawCar(ctx, v);
   }
   const counts = presenceCounts(state); // one agent scan shared by all buildings
   for (const b of state.buildings.values()) drawBuilding(ctx, state, b, counts);
+  drawMotorways(ctx, state); // overpasses float above buildings and streets
+  // vehicles on a motorway get a second paint so the span doesn't cover them
+  for (const v of state.vehicles.values()) {
+    const seg = v.segs?.[v.seg];
+    const e = seg?.edgeId != null ? state.roadEdges.get(seg.edgeId) : null;
+    if (e?.motorway && v.kind !== 'train') drawCar(ctx, v);
+  }
   ctx.restore();
   drawLegend(ctx, h);
 }
@@ -181,8 +208,11 @@ function drawRoads(ctx, state) {
   ctx.lineJoin = 'round';
   ctx.strokeStyle = '#b0a99c';
   ctx.lineWidth = w + 2.5;
-  for (const e of state.roadEdges.values()) strokePolyline(ctx, e.pts);
   for (const e of state.roadEdges.values()) {
+    if (!e.motorway) strokePolyline(ctx, e.pts);
+  }
+  for (const e of state.roadEdges.values()) {
+    if (e.motorway) continue;
     const cong = 1 - congestFactor(state, e); // 0 free → ~0.55 full
     const frac = Math.min(1, cong / (1 - CONFIG.roads.congestFactor));
     ctx.strokeStyle = hexLerp(ROAD_FREE, ROAD_BUSY, frac);
@@ -193,15 +223,110 @@ function drawRoads(ctx, state) {
   ctx.lineWidth = 1;
   ctx.setLineDash([6, 5]);
   for (const e of state.roadEdges.values()) {
+    if (e.motorway) continue;
     const L = polyLen(e.pts);
     const t = Math.min(w * 0.7, L / 2 - 4);   // pull dashes back from each end
     if (t <= 0) continue;
     strokePolyline(ctx, slicePolyline(e.pts, t / L, 1 - t / L));
   }
   ctx.setLineDash([]);
+  // roundabout centres get a raised island — covers the spoke tips and makes
+  // the ring read as one piece of kit rather than four little roads
+  const islands = new Set();
+  for (const e of state.roadEdges.values()) {
+    const c = e.roundabout;
+    if (!c) continue;
+    const k = `${c.x},${c.y}`;
+    if (islands.has(k)) continue;
+    islands.add(k);
+    ctx.fillStyle = '#b0a99c';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, CONFIG.roundabouts.radius * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8f8a7d';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, CONFIG.roundabouts.radius * 0.55 - 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // traffic lights: the MM marker — a white ring at the junction plus a
+  // green dot on each arm currently holding the green
+  for (const n of state.roadNodes.values()) {
+    const L = n.light;
+    if (!L) continue;
+    ctx.fillStyle = '#3a3a38';
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#f5f2ec';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, 5.5, 0, Math.PI * 2);
+    ctx.stroke();
+    for (const eid of L.groups[L.idx] ?? []) {
+      const e = state.roadEdges.get(eid);
+      if (!e) continue;
+      const atA = e.a === n.id;
+      const pen = atA ? e.pts[1] : e.pts[e.pts.length - 2];
+      if (!pen) continue;
+      const ang = Math.atan2(pen.y - n.y, pen.x - n.x);
+      ctx.fillStyle = '#2ecc71';
+      ctx.beginPath();
+      ctx.arc(n.x + Math.cos(ang) * 14, n.y + Math.sin(ang) * 14, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// motorways: a darker, chunkier carriageway painted after the buildings so
+// spans read as overpasses — light casing, asphalt fill, white centre dashes
+function drawMotorways(ctx, state) {
+  const w = CONFIG.motorways.width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#a39c8e';
+  ctx.lineWidth = w + 3;
+  for (const e of state.roadEdges.values()) {
+    if (e.motorway) strokePolyline(ctx, e.pts);
+  }
+  ctx.strokeStyle = '#6f6a61';
+  ctx.lineWidth = w;
+  for (const e of state.roadEdges.values()) {
+    if (e.motorway) strokePolyline(ctx, e.pts);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([7, 6]);
+  for (const e of state.roadEdges.values()) {
+    if (e.motorway) strokePolyline(ctx, e.pts);
+  }
+  ctx.setLineDash([]);
 }
 
 function drawRoadDraft(ctx, state, rd) {
+  if (rd.motor) {
+    // free-form span preview — dark while it can land, red until it does
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.globalAlpha = 0.75;
+    ctx.setLineDash([10, 7]);
+    ctx.strokeStyle = rd.endAnchored ? '#4a453f' : '#e63946';
+    ctx.lineWidth = CONFIG.motorways.width - 2;
+    strokePolyline(ctx, [...rd.pts, rd.tail]);
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    if (rd.cursor) {
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.fillStyle = rd.endAnchored ? '#555' : '#e63946';
+      ctx.fillText(
+        rd.endAnchored ? '1 motorway' : 'end on a road or building',
+        rd.cursor.x + 12, rd.cursor.y - 8,
+      );
+    }
+    ctx.restore();
+    return;
+  }
   if (!rd.cells.length) return;
   const pts = rd.cells.map((c) => cellCenter(c.cx, c.cy));
   const demolish = rd.demolish;

@@ -58,6 +58,31 @@
             <rect x="21" y="13" width="5" height="9" rx="1" fill="#e63946"/>
           </svg>
         </button>
+        <button id="hot-motorway" class="hot sub hidden" title="Motorway (M) — elevated express road">
+          <svg viewBox="0 0 28 28" width="24" height="24">
+            <rect x="3" y="16" width="22" height="4.5" rx="2" fill="#b0a99c"/>
+            <path d="M5 23 Q14 3 23 23" fill="none" stroke="#4a453f" stroke-width="5.5" stroke-linecap="round"/>
+            <path d="M5 23 Q14 3 23 23" fill="none" stroke="#f5f2ec" stroke-width="1.2" stroke-dasharray="3 3.5"/>
+          </svg>
+          <span class="hot-badge" id="hot-motor-count">0</span>
+        </button>
+        <button id="hot-roundabout" class="hot sub hidden" title="Roundabout (O) — free-flow junction">
+          <svg viewBox="0 0 28 28" width="24" height="24">
+            <circle cx="14" cy="14" r="8.5" fill="none" stroke="#4a453f" stroke-width="5"/>
+            <circle cx="14" cy="14" r="8.5" fill="none" stroke="#f5f2ec" stroke-width="1.1" stroke-dasharray="3 3.5"/>
+            <path d="M7.5 4.5 L13.5 5.5 L9 10.5 Z" fill="#4a453f"/>
+          </svg>
+          <span class="hot-badge" id="hot-round-count">0</span>
+        </button>
+        <button id="hot-light" class="hot sub hidden" title="Traffic light (T) — phase-controlled junction">
+          <svg viewBox="0 0 28 28" width="24" height="24">
+            <rect x="9" y="3" width="10" height="22" rx="5" fill="#4a453f"/>
+            <circle cx="14" cy="8" r="2.3" fill="#e63946"/>
+            <circle cx="14" cy="14" r="2.3" fill="#e9a13b"/>
+            <circle cx="14" cy="20" r="2.3" fill="#2ecc71"/>
+          </svg>
+          <span class="hot-badge" id="hot-light-count">0</span>
+        </button>
       </div>
     </div>
   </div>
@@ -73,6 +98,15 @@
       <p id="gameover-reason"></p>
       <p id="gameover-stats"></p>
       <button onclick="location.reload()">Play again</button>
+    </div>
+  </div>
+  <div id="pausemenu" class="hidden">
+    <div id="pause-card">
+      <h2>Paused</h2>
+      <div id="pause-options">
+        <button id="pause-resume">Resume</button>
+        <button id="pause-restart">Restart</button>
+      </div>
     </div>
   </div>
   <script type="module" src="src/main.js"></script>

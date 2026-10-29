@@ -5,7 +5,7 @@ import * as economy from './economy.js';
 import * as agents from './agents.js';
 import * as vehicles from './vehicles.js';
 import * as food from './food.js';
-import { initInput, getDraft, getRoadDraft, getTool, updateCamera } from './input.js';
+import { initInput, getDraft, getRoadDraft, getTool, getHover, updateCamera } from './input.js';
 import { draw } from './render.js';
 import { initUI, updateHUD, showUpgrade, showGameOver } from './ui.js';
 
@@ -92,7 +92,7 @@ function frame(now) {
     state.camera.y = cy - CONFIG.view.height / 2;
     updateCamera(state, 0); // just clamps
   }
-  draw(ctx, state, getDraft(), getRoadDraft(), getTool(), state.camera, CONFIG.view.width, CONFIG.view.height);
+  draw(ctx, state, getDraft(), getRoadDraft(), getTool(), state.camera, CONFIG.view.width, CONFIG.view.height, getHover());
   updateHUD(state);
   requestAnimationFrame(frame);
 }

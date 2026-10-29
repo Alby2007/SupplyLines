@@ -7,8 +7,11 @@ let el = {};
 let lastColorsHtml = '';
 let lastRoad = -1;
 let lastLines = -1;
+let lastMotor = -1;
+let lastRound = -1;
+let lastLight = -1;
 
-const UPGRADES = [
+export const UPGRADES = [
   {
     name: 'New transit line',
     ok: () => true,
@@ -32,6 +35,21 @@ const UPGRADES = [
     name: 'Wider roads (+2 capacity)',
     ok: (s) => s.roadEdges.size > 0,
     apply: (s) => { s.roadCapBonus += 2; },
+  },
+  {
+    name: 'Motorway (elevated express road)',
+    ok: (s) => s.motorwayGranted && s.motorways < CONFIG.motorways.cap,
+    apply: (s) => { s.motorways = Math.min(CONFIG.motorways.cap, s.motorways + 1); },
+  },
+  {
+    name: 'Roundabout (free-flow junction)',
+    ok: (s) => s.roundaboutGranted && s.roundabouts < CONFIG.roundabouts.cap,
+    apply: (s) => { s.roundabouts = Math.min(CONFIG.roundabouts.cap, s.roundabouts + 1); },
+  },
+  {
+    name: 'Traffic light (phase-controlled junction)',
+    ok: (s) => s.trafficLightGranted && s.trafficLights < CONFIG.trafficLights.cap,
+    apply: (s) => { s.trafficLights = Math.min(CONFIG.trafficLights.cap, s.trafficLights + 1); },
   },
   {
     name: '+12 road tiles',
@@ -69,6 +87,12 @@ export function initUI(state) {
     hotJunction: document.getElementById('hot-junction'),
     subbar: document.getElementById('subbar'),
     hotBulldoze: document.getElementById('hot-bulldoze'),
+    hotMotorway: document.getElementById('hot-motorway'),
+    hotMotorCount: document.getElementById('hot-motor-count'),
+    hotRoundabout: document.getElementById('hot-roundabout'),
+    hotRoundCount: document.getElementById('hot-round-count'),
+    hotLight: document.getElementById('hot-light'),
+    hotLightCount: document.getElementById('hot-light-count'),
     roadbar: document.getElementById('roadbar'),
     hotRoadCount: document.getElementById('hot-road-count'),
     hotLineCount: document.getElementById('hot-line-count'),
@@ -80,8 +104,13 @@ export function initUI(state) {
     over: document.getElementById('gameover'),
     overReason: document.getElementById('gameover-reason'),
     overStats: document.getElementById('gameover-stats'),
+    pauseMenu: document.getElementById('pausemenu'),
+    pauseResume: document.getElementById('pause-resume'),
+    pauseRestart: document.getElementById('pause-restart'),
   };
   el.pause.addEventListener('click', () => { state.paused = !state.paused; });
+  el.pauseResume.addEventListener('click', () => { state.pauseMenu = false; state.paused = false; });
+  el.pauseRestart.addEventListener('click', () => location.reload());
   el.s1.addEventListener('click', () => { state.speed = 1; });
   el.s2.addEventListener('click', () => { state.speed = 2; });
   el.hotLine.addEventListener('click', () => setTool('line'));
@@ -92,6 +121,18 @@ export function initUI(state) {
   // bulldozer is a sub-tool of the road group: re-clicking falls back to 'road'
   el.hotBulldoze.addEventListener('click', () =>
     setTool(getTool() === 'bulldoze' ? 'road' : 'bulldoze'));
+  // motorway likewise — armable only while a span is in stock
+  el.hotMotorway.addEventListener('click', () => {
+    if (state.motorways > 0) setTool(getTool() === 'motorway' ? 'road' : 'motorway');
+  });
+  // roundabout — same stock-gated pattern, click-to-place on junctions
+  el.hotRoundabout.addEventListener('click', () => {
+    if (state.roundabouts > 0) setTool(getTool() === 'roundabout' ? 'road' : 'roundabout');
+  });
+  // traffic light — armable with stock; clicking a lit junction always removes
+  el.hotLight.addEventListener('click', () => {
+    if (state.trafficLights > 0) setTool(getTool() === 'light' ? 'road' : 'light');
+  });
 }
 
 export function updateHUD(state) {
@@ -100,17 +141,42 @@ export function updateHUD(state) {
   el.delivered.textContent = state.delivered;
   el.freight.textContent = `${state.freightDelivered} food`;
   el.pause.innerHTML = state.paused ? '&#9654;' : '&#10074;&#10074;';
+  el.pauseMenu.classList.toggle('hidden', !state.pauseMenu);
   el.s1.classList.toggle('on', state.speed === 1);
   el.s2.classList.toggle('on', state.speed === 2);
   const tool = getTool();
   const lineGroup = tool === 'line' || tool === 'junction';
-  const roadGroup = tool === 'road' || tool === 'bulldoze';
+  const roadGroup =
+    tool === 'road' || tool === 'bulldoze' || tool === 'motorway' ||
+    tool === 'roundabout' || tool === 'light';
   el.hotLine.classList.toggle('on', lineGroup);
   el.hotRoad.classList.toggle('on', roadGroup);
   el.subbar.classList.toggle('hidden', !lineGroup);
   el.roadbar.classList.toggle('hidden', !roadGroup);
   el.hotJunction.classList.toggle('on', tool === 'junction');
   el.hotBulldoze.classList.toggle('on', tool === 'bulldoze');
+  // the motorway slot appears once the first one is granted; empty stock dims
+  el.hotMotorway.classList.toggle('hidden', !state.motorwayGranted);
+  el.hotMotorway.classList.toggle('on', tool === 'motorway');
+  el.hotMotorway.classList.toggle('empty', state.motorways <= 0);
+  if (lastMotor !== state.motorways) {
+    lastMotor = state.motorways;
+    el.hotMotorCount.textContent = state.motorways;
+  }
+  el.hotRoundabout.classList.toggle('hidden', !state.roundaboutGranted);
+  el.hotRoundabout.classList.toggle('on', tool === 'roundabout');
+  el.hotRoundabout.classList.toggle('empty', state.roundabouts <= 0);
+  if (lastRound !== state.roundabouts) {
+    lastRound = state.roundabouts;
+    el.hotRoundCount.textContent = state.roundabouts;
+  }
+  el.hotLight.classList.toggle('hidden', !state.trafficLightGranted);
+  el.hotLight.classList.toggle('on', tool === 'light');
+  el.hotLight.classList.toggle('empty', state.trafficLights <= 0);
+  if (lastLight !== state.trafficLights) {
+    lastLight = state.trafficLights;
+    el.hotLightCount.textContent = state.trafficLights;
+  }
   if (lastRoad !== state.roadTiles) {
     lastRoad = state.roadTiles;
     el.hotRoadCount.textContent = state.roadTiles;
