@@ -148,10 +148,22 @@ Every 60 seconds: +18 road tiles and a choice of **1 of 2** upgrades:
 - Cargo wagon (freight trains haul more crates)
 - +1 market delivery truck
 - Motorway / Roundabout / Traffic light (+1 stock, once granted)
+- Bridges +8 — roads may cross water (Map 3 only, once granted)
 
 The first motorway, roundabout, and traffic light each arrive automatically at
 the start of **week 4**; after that they show up in the weekly picks (each
-capped at 9 in stock).
+capped at 9 in stock). On Map 3 a bundle of **12 bridges** is gifted when
+week 1 completes — on top of the pick — and more appear in the weekly pool.
+
+## Stars
+
+There's no finish line — survival is the win. At game over the run earns
+**0–3 stars** by the week you *reached*: thresholds are 5/8/11 weeks on Maps
+1–2 and 4/7/10 on Map 3 (`CONFIG.win.stars`, per-level overridable). The
+game-over card shows the stars plus your deliveries; your **best run per map**
+(stars, then deliveries as the tiebreak) is saved to `localStorage` and shown
+as a star row under each level card on the Levels screen. Beat your stored
+best and the card calls it out — **New best run!**
 
 ## Pause menu
 
@@ -160,10 +172,31 @@ freezes and a centered card offers **Resume** (or `Esc` again), **Levels**,
 and **Restart**. While it's open every other hotkey is dead. `Space` and the
 HUD ❚❚ button still pause without the menu.
 
-**Levels** opens a full-screen picker: a card per map (green thumb "Map 1",
-white thumb "Map 2" — same world size with a blank white surface, via
-`?level=2`). Picking a card starts a **fresh city** — there's no save, so
+**Levels** opens a full-screen picker: a card per map —
+
+- **Map 1** — the meadow: 40×32, green surface, base budgets
+- **Map 2** — the desert: 80×32 (double-wide), sand surface, an impassable
+  oasis, faster vehicles and a bigger road budget for the longer routes
+- **Map 3** — the deep green: same 80×32 size and budgets as Map 2, darker
+  pastel-green surface, and the city seeds on the **right** side of the map —
+  hemmed in from the west by a wide river through the middle third. Surface
+  crossings need **bridges** (draw a road across; one per water tile, spent
+  automatically), while motorways and transit lines pass over for free
+
+Picking a card starts a **fresh city** (`?level=N`) — there's no save, so
 leaving mid-game loses progress. `Esc`/Back returns to the pause card.
+
+## Visual aids
+
+- **Minimap** — bottom-right corner of the map card. Shows the whole world:
+  roads, motorway spans, water, and building dots in their colours, plus a
+  white rect marking the slice your camera is looking at. It's passive —
+  it doesn't block camera drags and can't be clicked.
+- **Spawn arrows** — when a new building appears outside your viewport, a
+  bobbing chevron sits on the screen edge closest to it, pointing toward it
+  and tinted the building's colour. It lives for ~12s (covering the dashed
+  "incoming" phase plus the first moments after it opens), fading in and
+  out. Pan toward it or it quietly expires.
 
 ## Automatic behaviour worth knowing
 

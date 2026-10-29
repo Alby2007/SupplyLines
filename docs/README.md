@@ -51,7 +51,8 @@ System deep dives, in `systems/`:
 | File | Responsibility |
 |---|---|
 | `src/config.js` | All tuning constants + shape table |
-| `src/state.js` | `createState()`, `nid()`, `dist()` |
+| `src/state.js` | `createState()`, `nid()`, `dist()`, `applyLevelFeatures()` |
+| `src/terrain.js` | Deterministic river generator (seeded noise → water cells) |
 | `src/grid.js` | Cell math: Bresenham paths, metro routing, polyline utils |
 | `src/spawn.js` | Building placement, type/colour choice, colour unlocks |
 | `src/roads.js` | Road nodes/edges, splitting, cell index, bulldozer, snapping |

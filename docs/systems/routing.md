@@ -62,7 +62,8 @@ edges merge:
 
 `findPathTo` is `findPath` with a single-building predicate.
 `roadDistancesFrom` is a multi-source Dijkstra over the road-only graph
-returning `{dist, src}` maps — used to assign each home its nearest market.
+returning `{dist, src}` maps — used to assign each home its nearest market
+(staffed markets preferred; see food.md).
 
 ## The `graphFor` cache
 

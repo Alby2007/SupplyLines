@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 import { presenceCounts } from './agents.js';
 import { trainPos, carPos } from './vehicles.js';
 import { congestFactor } from './routing.js';
-import { roadCellCost, slicePolyline, polyLen, demolishRefund } from './roads.js';
+import { roadCellCost, bridgeCost, slicePolyline, polyLen, demolishRefund } from './roads.js';
 import { linePts } from './networks.js';
 import { cellCenter, cellKey, routePts } from './grid.js';
 
@@ -266,7 +266,14 @@ function drawRoads(ctx, state) {
   ctx.strokeStyle = '#b0a99c';
   ctx.lineWidth = w + 2.5;
   for (const e of state.roadEdges.values()) {
-    if (!e.motorway) strokePolyline(ctx, e.pts);
+    if (!e.motorway && !e.bridge) strokePolyline(ctx, e.pts);
+  }
+  // bridge decks get a wider pale-timber casing — the road surface paints on
+  // top and leaves ~2px of rail visible each side, like the MM plank span
+  ctx.strokeStyle = '#d9c9a3';
+  ctx.lineWidth = w + 4.5;
+  for (const e of state.roadEdges.values()) {
+    if (e.bridge) strokePolyline(ctx, e.pts);
   }
   for (const e of state.roadEdges.values()) {
     if (e.motorway) continue;
@@ -388,8 +395,8 @@ function drawRoadDraft(ctx, state, rd) {
   const pts = rd.cells.map((c) => cellCenter(c.cx, c.cy));
   const demolish = rd.demolish;
   const cost = demolish ? 0 : roadCellCost(state, rd.cells);
-  const wet = rd.cells.some((c) => state.water?.has(cellKey(c)));
-  const ok = demolish || (!wet && cost <= state.roadTiles);
+  const wet = demolish ? 0 : bridgeCost(state, rd.cells);
+  const ok = demolish || (wet <= (state.bridges ?? 0) && cost <= state.roadTiles);
   ctx.save();
   ctx.setLineDash([8, 6]);
   ctx.strokeStyle = demolish ? '#e63946' : ok ? '#8a8a8a' : '#e63946';
@@ -408,7 +415,8 @@ function drawRoadDraft(ctx, state, rd) {
       if (refund > 0) ctx.fillText(`+${refund} tiles`, rd.cursor.x + 12, rd.cursor.y - 8);
     } else {
       ctx.fillStyle = ok ? '#555' : '#e63946';
-      ctx.fillText(`${cost} tiles`, rd.cursor.x + 12, rd.cursor.y - 8);
+      const label = wet ? `${cost} tiles + ${wet} bridges` : `${cost} tiles`;
+      ctx.fillText(label, rd.cursor.x + 12, rd.cursor.y - 8);
     }
   }
   ctx.restore();

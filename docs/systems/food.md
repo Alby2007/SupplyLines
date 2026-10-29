@@ -46,9 +46,11 @@ freight train can't rot the farm. On arrival at a market: `b.stock++`,
 Every `assignInterval` (3s), `assignHomes` runs `roadDistancesFrom` per colour:
 
 - For each colour, multi-source Dijkstra over the **road** graph from that
-  colour's active markets.
+  colour's active markets — run first over markets with ≥1 worker (staff are
+  the truck drivers), then over all markets as fallback.
 - Each active same-colour home records `assignedMarket` = nearest reachable
-  market (or `null`) and `marketDist`.
+  **staffed** market, falling back to nearest unstaffed one when nothing
+  staffed can reach — an unstaffed market can't poach homes it can't serve.
 - Unreachable or colour-less homes get `assignedMarket: null` — they starve
   unless the player fixes connectivity (that's the game).
 

@@ -52,12 +52,19 @@ Per home, `spawnClock` counts down (randomized 0..interval at placement):
 
 Upgrade list (`ui.js` `UPGRADES`): new transit line · add a train · +3 waiting
 capacity on all buildings · +2 road capacity · +12 road tiles · cargo wagon ·
-+1 market truck · motorway · roundabout · traffic light.
++1 market truck · motorway · roundabout · traffic light · bridges.
 
 The first motorway, roundabout, and traffic light are granted automatically
 once `week >= unlockWeek` (4 — i.e. when week 3 completes), via
 `*Granted`/`state.X = 1` flags in `economy.update`. After that they appear in
 the weekly picks (each `ok`-gated on its grant flag and capped at 9).
+
+**Bridges** (Map 3 only) follow the same pattern but gift a *bundle*: at
+`week >= 2` — when week 1 completes — `state.bridges = grant` (12) lands on
+top of the normal pick, and `Bridges +pick` joins the upgrade pool gated on
+`bridgesGranted` and `CONFIG.bridges.cap`. There's no bridge tool: drawing a
+road across water auto-spends 1 bridge per uncovered water cell, and the
+bulldozer refunds them — see roads.md.
 
 ## Game-over flow
 

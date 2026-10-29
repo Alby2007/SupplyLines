@@ -155,16 +155,33 @@ const connectRadius = (b) =>
     : b.type === 'home' ? CONFIG.buildings.homeRadius
     : CONFIG.buildings.radius);
 
-// tiles a drawn cell path would consume — only cells not already road
+// tiles a drawn cell path would consume — only cells not already road;
+// water cells aren't tiles at all — they're paid in bridges instead
 export function roadCellCost(state, cells) {
   const idx = roadCellIndex(state);
   const seen = new Set();
   let cost = 0;
   for (const c of cells) {
     const k = cellKey(c);
-    if (seen.has(k) || idx.has(k)) continue;
+    if (seen.has(k) || idx.has(k) || state.water?.has(k)) continue;
     seen.add(k);
     cost++;
+  }
+  return cost;
+}
+
+// bridges a drawn cell path would consume — water cells with no road on them
+// yet (MM: each water tile the road spans costs one bridge)
+export function bridgeCost(state, cells) {
+  if (!state.water?.size) return 0;
+  const idx = roadCellIndex(state);
+  const seen = new Set();
+  let cost = 0;
+  for (const c of cells) {
+    const k = cellKey(c);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (state.water.has(k) && !idx.has(k)) cost++;
   }
   return cost;
 }
@@ -231,6 +248,7 @@ export function splitEdgeMulti(state, e, ts) {
     if (e.oneway) ne.oneway = true;
     if (e.roundabout) ne.roundabout = e.roundabout;
     if (e.motorway) ne.motorway = true;
+    if (e.bridge) ne.bridge = true;
     return ne;
   };
   for (let i = 0; i < chunks.length; i++) {
@@ -256,12 +274,16 @@ export function splitEdgeMulti(state, e, ts) {
 export function buildRoad(state, cells) {
   if (!cells || cells.length < 2) return [];
 
-  // junction cells are rail-only, and water is impassable — either rejects
+  // junction cells are rail-only — they reject outright; water just costs
+  // bridges (MM: roads bridge automatically when the stock covers the span)
   const jCells = new Set();
   for (const b of state.buildings.values()) {
     if (b.type === 'junction') jCells.add(cellKey(cellOf(b)));
   }
-  if (cells.some((c) => jCells.has(cellKey(c)) || state.water?.has(cellKey(c)))) return [];
+  if (cells.some((c) => jCells.has(cellKey(c)))) return [];
+  const wet = bridgeCost(state, cells);
+  if (wet > (state.bridges ?? 0)) return [];
+  state.bridges -= wet;
 
   const pts = cells.map((c) => cellCenter(c.cx, c.cy));
 
@@ -380,6 +402,15 @@ export function buildRoad(state, cells) {
       edges.push(addRoadEdge(state, aId, bId, [{ x: na.x, y: na.y }, { x: nb.x, y: nb.y }]));
     }
   }
+  // edges that land on water cells are bridge decks — flagged so splits keep
+  // them and the renderer can rail them
+  if (state.water?.size) {
+    for (const e of edges) {
+      if (cellsAlongPolyline(e.pts).some((c) => state.water.has(cellKey(c)))) {
+        e.bridge = true;
+      }
+    }
+  }
   return edges;
 }
 
@@ -413,19 +444,27 @@ function demolishTargets(state, cells) {
     }
   }
   const freed = new Set();
+  const wet = new Set(); // water cells bridge decks sat on — refunded as bridges
   for (const id of doomed) {
     const e = state.roadEdges.get(id);
     // ring cells refund nothing — the roundabout cost an item, not tiles
     if (e && !e.roundabout) {
-      for (const c of cellsAlongPolyline(e.pts)) freed.add(cellKey(c));
+      for (const c of cellsAlongPolyline(e.pts)) {
+        const k = cellKey(c);
+        (state.water?.has(k) ? wet : freed).add(k);
+      }
     }
   }
   // a freed cell stays road if a surviving edge still covers it
   for (const e of state.roadEdges.values()) {
     if (doomed.has(e.id)) continue;
-    for (const c of cellsAlongPolyline(e.pts)) freed.delete(cellKey(c));
+    for (const c of cellsAlongPolyline(e.pts)) {
+      const k = cellKey(c);
+      freed.delete(k);
+      wet.delete(k);
+    }
   }
-  return { doomed, freed: freed.size };
+  return { doomed, freed: freed.size, wet: wet.size };
 }
 
 // motorway edge ids a bulldozer drag touches — the whole span dies at once
@@ -447,7 +486,7 @@ export function demolishRefund(state, cells) {
 // remove every edge under the drawn path; orphan nodes are swept (building
 // nodes stay so homes/works remain re-connectable). Returns freed tiles.
 export function demolishRoad(state, cells) {
-  const { doomed, freed } = demolishTargets(state, cells);
+  const { doomed, freed, wet } = demolishTargets(state, cells);
   for (const id of doomed) {
     const e = state.roadEdges.get(id);
     if (e) removeRoadEdge(state, e);
@@ -467,6 +506,10 @@ export function demolishRoad(state, cells) {
       }
       state.roadNodes.delete(n.id);
     }
+  }
+  // demolished decks hand their bridges back (MM: bridge stock refunds too)
+  if (wet && CONFIG.bridges) {
+    state.bridges = Math.min(CONFIG.bridges.cap, state.bridges + wet);
   }
   return freed;
 }

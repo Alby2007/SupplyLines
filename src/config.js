@@ -35,6 +35,30 @@ export const CONFIG = {
         edge: '#7cb2c7',
       },
     },
+    3: {
+      map: { width: 3200, height: 1280 },  // same 80×32 canvas as Map 2
+      // same distance-compensation budgets — they're about map size, not theme
+      roads: { carSpeed: 110, truckSpeed: 85, tilesStart: 50, tilesPerWeek: 22 },
+      spawn: { seedBias: 'right' },        // opening city forms on the right
+      water: {
+        // vertical river through the middle-third columns, ≥6 cells thick —
+        // the right-seeded city's western gate; motorways and transit lines
+        // are the only way across (fixed seed → same river every game)
+        river: { center: 40, meander: 4.2, minHalf: 3, wobble: 2.2, seed: 11 },
+        fill: '#71b3d6',                   // deeper than the oasis's dusty sky
+        edge: '#5398bf',
+      },
+      // MM bridges: no tool — a road drawn across water auto-spends one per
+      // water cell it covers. Map-3-only section; other maps never create it
+      bridges: {
+        unlockWeek: 2,     // gifted automatically once week 1 is done
+        grant: 12,         // the gift — ~1 full river crossing plus slack
+        pick: 8,           // bridges awarded when picked from upgrades
+        cap: 36,
+      },
+      // the river tax is real — softer star thresholds than the open maps
+      win: { stars: [4, 7, 10] },
+    },
   },
   spawn: {
     intervalStart: 14,      // seconds between new buildings at week 1
@@ -137,6 +161,9 @@ export const CONFIG = {
   },
   overflowLimit: 25,        // seconds at/over capacity before game over
   weekSeconds: 60,
+  // stars earned by the week you reach: die during week 5 → ★ at threshold 5.
+  // Levels may override the whole list (Map 3 runs easier targets)
+  win: { stars: [5, 8, 11] },
   lines: {
     maxStart: 3,
     width: 5,

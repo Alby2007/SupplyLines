@@ -24,6 +24,12 @@ spliced into the path — that's the "driveway" you see.
 2. `buildRoad(state, cells)` walks the path:
    - Junction cells are a **hard reject**: if any drawn cell holds a junction,
      the entire build fails (`return []`) — no road, no charge.
+   - Water cells are a **bridge spend**: `bridgeCost` counts water cells not
+     already holding road; if it exceeds `state.bridges` the whole build
+     fails, otherwise the count is deducted up front and every new edge
+     touching a water cell is flagged `e.bridge` (survives splits; rendered
+     with a pale-timber casing). MM parity — no bridge tool, drawing across
+     the river just spends them. Maps without water short-circuit to zero.
    - Cells already holding road merge into the network for free — cost only
      counts unindexed cells (`roadCellCost`), and only when `buildRoad` came
      back non-empty are tiles deducted.
@@ -32,7 +38,9 @@ spliced into the path — that's the "driveway" you see.
      endpoint when `t` near 0/1); otherwise a cell-center node.
    - Drawn cells that hit existing road **edges** get split-and-joined, which
      is how intersections form.
-3. Cost = `roadCellCost` = cells not already indexed in `roadCellIndex`.
+3. Cost = `roadCellCost` = cells not already indexed in `roadCellIndex` and
+   not water — tiles and bridges are separate currencies, so a river crossing
+   never double-charges.
 
 ## Splitting (`splitEdgeMulti`)
 
@@ -110,6 +118,9 @@ also means junction-box checks use the visual position.
   tiles — the item cost isn't refundable.
 - **Traffic lights refund** — a lit junction that loses all its roads returns
   the light to `state.trafficLights`.
+- **Bridges refund** — water cells under demolished decks come back to
+  `state.bridges` (capped at `CONFIG.bridges.cap`), while dry cells refund
+  tiles as usual.
 - **Orphan sweep**: road nodes with no remaining edges are removed — except
   building driveway nodes (`bid != null`), which persist so buildings stay
   reconnectable.

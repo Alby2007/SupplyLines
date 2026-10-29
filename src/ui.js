@@ -1,6 +1,31 @@
 import { CONFIG } from './config.js';
 import { addTrain } from './vehicles.js';
 import { getTool, setTool } from './input.js';
+import { levelTerrain } from './state.js';
+import { starsEarned } from './economy.js';
+
+// best-run persistence — a small JSON blob per level; the "no save" rule is
+// about the city itself, meta-progression survives reloads
+const BEST_KEY = 'supply-lines:best';
+function bestRuns() {
+  try { return JSON.parse(localStorage.getItem(BEST_KEY)) ?? {}; } catch { return {}; }
+}
+// returns true when this run is the new best for its level (stars first,
+// deliveries as the tiebreak) and persists it
+function recordBest(level, run) {
+  const all = bestRuns();
+  const prev = all[level];
+  const isBest = !prev || run.stars > prev.stars ||
+    (run.stars === prev.stars && run.delivered > prev.delivered);
+  if (isBest) {
+    all[level] = run;
+    try { localStorage.setItem(BEST_KEY, JSON.stringify(all)); } catch { /* private mode */ }
+  }
+  return { isBest, prev };
+}
+
+const starsRow = (n) =>
+  [0, 1, 2].map((i) => `<span class="${i < n ? 'star-on' : 'star-off'}">★</span>`).join('');
 
 let el = {};
 // last-rendered HUD values — DOM writes only happen on change, not per frame
@@ -10,6 +35,7 @@ let lastLines = -1;
 let lastMotor = -1;
 let lastRound = -1;
 let lastLight = -1;
+let lastBridge = -1;
 
 export const UPGRADES = [
   {
@@ -50,6 +76,13 @@ export const UPGRADES = [
     name: 'Traffic light (phase-controlled junction)',
     ok: (s) => s.trafficLightGranted && s.trafficLights < CONFIG.trafficLights.cap,
     apply: (s) => { s.trafficLights = Math.min(CONFIG.trafficLights.cap, s.trafficLights + 1); },
+  },
+  {
+    // Map 3 only — the section exists just on levels that define a river;
+    // bridgesGranted stays false everywhere else so this never appears
+    get name() { return `Bridges +${CONFIG.bridges?.pick ?? 0} (roads cross water)`; },
+    ok: (s) => s.bridgesGranted && s.bridges < CONFIG.bridges.cap,
+    apply: (s) => { s.bridges = Math.min(CONFIG.bridges.cap, s.bridges + CONFIG.bridges.pick); },
   },
   {
     name: '+12 road tiles',
@@ -93,6 +126,8 @@ export function initUI(state) {
     hotRoundCount: document.getElementById('hot-round-count'),
     hotLight: document.getElementById('hot-light'),
     hotLightCount: document.getElementById('hot-light-count'),
+    hotBridge: document.getElementById('hot-bridge'),
+    hotBridgeCount: document.getElementById('hot-bridge-count'),
     roadbar: document.getElementById('roadbar'),
     hotRoadCount: document.getElementById('hot-road-count'),
     hotLineCount: document.getElementById('hot-line-count'),
@@ -104,6 +139,8 @@ export function initUI(state) {
     over: document.getElementById('gameover'),
     overReason: document.getElementById('gameover-reason'),
     overStats: document.getElementById('gameover-stats'),
+    overStars: document.getElementById('gameover-stars'),
+    overBest: document.getElementById('gameover-best'),
     pauseMenu: document.getElementById('pausemenu'),
     pauseResume: document.getElementById('pause-resume'),
     pauseRestart: document.getElementById('pause-restart'),
@@ -112,6 +149,7 @@ export function initUI(state) {
     levelsBack: document.getElementById('levels-back'),
     levelMap1: document.getElementById('level-map1'),
     levelMap2: document.getElementById('level-map2'),
+    levelMap3: document.getElementById('level-map3'),
   };
   el.pause.addEventListener('click', () => { state.paused = !state.paused; });
   el.pauseResume.addEventListener('click', () => { state.pauseMenu = false; state.paused = false; });
@@ -121,6 +159,45 @@ export function initUI(state) {
   // no save system — picking a level is a fresh city, mid-game progress is lost
   el.levelMap1.addEventListener('click', () => { location.href = location.pathname; });
   el.levelMap2.addEventListener('click', () => { location.href = location.pathname + '?level=2'; });
+  el.levelMap3.addEventListener('click', () => { location.href = location.pathname + '?level=3'; });
+  // each card also carries the player's best stars for that map
+  const best = bestRuns();
+  for (const [lvl, card] of [[1, el.levelMap1], [2, el.levelMap2], [3, el.levelMap3]]) {
+    const row = document.createElement('div');
+    row.className = 'level-stars';
+    row.innerHTML = starsRow(best[lvl]?.stars ?? 0);
+    card.appendChild(row);
+  }
+  // level cards show their real terrain — the same defs applyLevelFeatures
+  // materialises (oasis blob, the seeded river). Each thumb crops to a square
+  // window spanning the map's full height, centred on the water, so a river
+  // reads as the top-to-bottom span it is rather than a squiggle mid-card
+  for (const [lvl, card] of [[1, el.levelMap1], [2, el.levelMap2], [3, el.levelMap3]]) {
+    const t = levelTerrain(lvl);
+    if (!t.water.size) continue;
+    const thumb = card.querySelector('.level-thumb');
+    const c = document.createElement('canvas');
+    const dpr = window.devicePixelRatio || 1;
+    c.width = 190 * dpr;
+    c.height = 190 * dpr;
+    c.style.width = '100%';
+    c.style.height = '100%';
+    thumb.appendChild(c);
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const pts = [...t.water].map((k) => k.split(',').map(Number));
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const side = Math.min(t.cols, t.rows);
+    const ox = Math.max(0, Math.min(t.cols - side,
+      Math.round((Math.min(...xs) + Math.max(...xs)) / 2 - side / 2)));
+    const oy = Math.max(0, Math.min(t.rows - side,
+      Math.round((Math.min(...ys) + Math.max(...ys)) / 2 - side / 2)));
+    const cs = 190 / side;
+    ctx.fillStyle = t.fill;
+    for (const [cx, cy] of pts) {
+      ctx.fillRect((cx - ox) * cs, (cy - oy) * cs, cs + 0.5, cs + 0.5); // +0.5 closes seams
+    }
+  }
   el.s1.addEventListener('click', () => { state.speed = 1; });
   el.s2.addEventListener('click', () => { state.speed = 2; });
   el.hotLine.addEventListener('click', () => setTool('line'));
@@ -188,6 +265,14 @@ export function updateHUD(state) {
     lastLight = state.trafficLights;
     el.hotLightCount.textContent = state.trafficLights;
   }
+  // bridges are inventory, not a tool — a passive counter that appears with
+  // the first grant and never arms anything
+  el.hotBridge.classList.toggle('hidden', !state.bridgesGranted);
+  el.hotBridge.classList.toggle('empty', state.bridges <= 0);
+  if (lastBridge !== state.bridges) {
+    lastBridge = state.bridges;
+    el.hotBridgeCount.textContent = state.bridges;
+  }
   if (lastRoad !== state.roadTiles) {
     lastRoad = state.roadTiles;
     el.hotRoadCount.textContent = state.roadTiles;
@@ -245,8 +330,16 @@ export function showUpgrade(state) {
 
 export function showGameOver(state) {
   el.overReason.textContent = state.gameOver.reason;
+  const stars = starsEarned(state);
+  el.overStars.innerHTML = starsRow(stars);
   el.overStats.textContent =
     `${state.delivered} passengers and ${state.freightDelivered} food delivered over ` +
     `${state.week} week${state.week === 1 ? '' : 's'}`;
+  const { isBest, prev } = recordBest(state.level, {
+    stars, week: state.week, delivered: state.delivered,
+  });
+  el.overBest.textContent = isBest
+    ? 'New best run!'
+    : prev ? `Best: ${'★'.repeat(prev.stars) || '—'} · ${prev.delivered} passengers` : '';
   el.over.classList.remove('hidden');
 }

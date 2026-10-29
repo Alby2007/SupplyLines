@@ -11,9 +11,14 @@ export function seedInitial(state) {
   const m = Math.ceil(CONFIG.map.margin / CS);
   const cols = Math.floor(CONFIG.map.width / CS);
   const rows = Math.floor(CONFIG.map.height / CS);
+  // per-level seedBias shifts the opening cluster horizontally — 'right'
+  // makes the city form on the right side; the city blob then grows from it
+  const t = Math.floor((cols - 2 * m) / 3);
+  const bias = CONFIG.spawn.seedBias;
+  const cx0 = bias === 'right' ? m + 2 * t : bias === 'left' ? m : m + t;
+  const cx1 = bias === 'right' ? cols - m - 1 : bias === 'left' ? m + t : m + 2 * t;
   const region = {
-    cx0: m + Math.floor((cols - 2 * m) / 3),
-    cx1: m + Math.floor(2 * (cols - 2 * m) / 3),
+    cx0, cx1,
     cy0: m + Math.floor((rows - 2 * m) / 3),
     cy1: m + Math.floor(2 * (rows - 2 * m) / 3),
   };

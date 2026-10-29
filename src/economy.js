@@ -9,6 +9,12 @@ const OVERFLOW_REASONS = {
   junction: 'A junction overflowed',
 };
 
+// 0–3 stars from the survival thresholds — the week you *reached* counts,
+// so dying mid-week-5 still earns a threshold-5 star
+export function starsEarned(state) {
+  return (CONFIG.win?.stars ?? []).filter((w) => state.week >= w).length;
+}
+
 export function update(state, dt) {
   // the first motorway and roundabout arrive once week 3 is done — more come
   // from weekly picks (MM: they're the upgrade-menu road tools)
@@ -23,6 +29,12 @@ export function update(state, dt) {
   if (!state.trafficLightGranted && state.week >= CONFIG.trafficLights.unlockWeek) {
     state.trafficLightGranted = true;
     state.trafficLights = 1;
+  }
+  // Map 3's river kit: a bundle is gifted once week 1 is done — on top of the
+  // weekly pick (the section only exists on maps that define it)
+  if (CONFIG.bridges && !state.bridgesGranted && state.week >= CONFIG.bridges.unlockWeek) {
+    state.bridgesGranted = true;
+    state.bridges = CONFIG.bridges.grant;
   }
 
   let foodEra = false;

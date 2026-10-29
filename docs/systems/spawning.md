@@ -7,8 +7,9 @@ must keep up with.
 
 `seedInitial` runs on the first update (`state.buildings.size === 0`): one home
 and one work, instantly active, in a region covering the **middle third** of
-the usable map (`margin`-inset). The camera centres on the cluster on the first
-frame (`main.js` `_camInit`).
+the usable map (`margin`-inset) — or the left/right third when a level sets
+`spawn.seedBias` (Map 3 seeds on the right). The camera centres on the cluster
+on the first frame (`main.js` `_camInit`).
 
 ## Cadence & type choice
 

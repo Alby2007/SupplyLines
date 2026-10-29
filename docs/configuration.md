@@ -31,9 +31,24 @@ in a level def (e.g. `water`) are created, not merged onto a missing base.
 | `water.at/cells` | anchor `{54,11}` + 16 offsets | The oasis — impassable cells, irregular blob |
 | `water.fill/edge` | `#9fcbe0` / `#7cb2c7` | Water colours (shoreline drawn on outer edges) |
 
+`levels[3]` — the deep-pastel green map (surface `#8fbe7d`, a step darker than
+Map 1's `#dce9cf`; ground colours live in `SURFACES` in `main.js`):
+
+| Key | Value | Effect |
+|---|---|---|
+| `map.width` | 3200 | Same 80×32 canvas as Map 2 |
+| `roads.*` | same as `levels[2]` | Distance-compensation is about map size, not theme |
+| `spawn.seedBias` | `'right'` | Seed cluster + early city form on the right third |
+| `water.river` | `{center:40, meander:4.2, minHalf:3, wobble:2.2, seed:11}` | Generated vertical river through the middle-third columns — the western gate for the right-seeded city |
+| `water.fill/edge` | `#71b3d6` / `#5398bf` | Deeper than the oasis — flowing water on green |
+| `bridges.unlockWeek` / `grant` | 2 / 12 | A bundle is gifted once week 1 is done, on top of the pick (~1 crossing + slack) |
+| `bridges.pick` / `cap` | 8 / 36 | Weekly-pick award and stock ceiling — Map-3-only item |
+
 `applyLevelFeatures(state)` materialises water defs into `state.water` (a Set
-of cellKeys) — roads, roundabouts, junctions, and building spawns all reject
-water cells; motorways and transit lines can pass over.
+of cellKeys) — `cells` gives a static offset list (oasis), `river` runs the
+deterministic generator in `terrain.js` (seeded, same river every game).
+Roads, roundabouts, junctions, and building spawns all reject water cells;
+motorways and transit lines can pass over.
 
 ## Spawning (`spawn.js`)
 
@@ -51,6 +66,7 @@ water cells; motorways and transit lines can pass over.
 | `marketsPerFarm` | 2 | Farms keep pace at ~1 per N markets |
 | `homesPerWork` | 4 | A work only spawns below this homes-per-work ratio |
 | `cityReach` | 10 | Cells — new buildings must be within this of the blob |
+| `seedBias` | unset | `'left'`/`'right'` shifts the seed cluster's third of the map |
 
 ## Commuters & shifts
 
@@ -108,6 +124,12 @@ picks, `cap` stock ceiling:
 | `trafficLights.cap` | 9 | Stock cap |
 | `trafficLights.phase` | 2.2 | Seconds each arm group holds green |
 
+`CONFIG.bridges` is **Map-3-only** (defined inside `levels[3]`, never in base
+config): `unlockWeek: 2` — the week-1 gift fires even though it's "the first
+grant", since it's a bundle rather than a single item. `grant: 12`, `pick: 8`,
+`cap: 36`. Every bridge gate checks `CONFIG.bridges`/`state.bridgesGranted`,
+so the mechanic simply doesn't exist on maps without the section.
+
 ## Food (`food.js`, `vehicles.js`)
 
 | Key | Default | Effect |
@@ -153,6 +175,7 @@ picks, `cap` stock ceiling:
 | Key | Default | Effect |
 |---|---|---|
 | `weekSeconds` | 60 | Week length; rollover grants tiles + an upgrade pick |
+| `win.stars` | `[5, 8, 11]` | Week-reached thresholds for 1/2/3 stars at game over (Map 3: `[4, 7, 10]`) |
 | `colors.palette` | 6 hex | Building/line colours |
 | `colors.startUnlocked` | 1 | Palette indexes available at start |
 | `colors.popToUnlock` | 12 | Live people of the newest colour to unlock the next |

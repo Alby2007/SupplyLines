@@ -18,7 +18,8 @@ const state = createState();
 state.level = level;
 applyLevelFeatures(state);
 window.__state = state; // live-state inspection for "why is X happening"
-if (state.level === 2) canvas.style.background = '#f0dcae';
+const SURFACES = { 1: '#dce9cf', 2: '#f0dcae', 3: '#8fbe7d' }; // per-map ground
+canvas.style.background = SURFACES[state.level] ?? SURFACES[1];
 
 const dpr = window.devicePixelRatio || 1;
 canvas.width = CONFIG.view.width * dpr;
@@ -35,7 +36,7 @@ minimap.width = MW * dpr;
 minimap.height = MH * dpr;
 minimap.style.width = `${MW}px`;
 minimap.style.height = `${MH}px`;
-if (state.level === 2) minimap.style.background = '#f0dcae';
+minimap.style.background = SURFACES[state.level] ?? SURFACES[1];
 const mctx = minimap.getContext('2d');
 mctx.scale(dpr, dpr);
 

@@ -143,6 +143,15 @@ html, body {
 }
 #gameover-card button:hover { background: #c1121f; }
 
+/* survival stars — gold when earned, ghost-grey outline when not */
+#gameover-stars { font-size: 30px; letter-spacing: 8px; margin: -8px 0 10px; }
+.star-on { color: #e9a13b; }
+.star-off { color: #d6d2c8; }
+#gameover-best { font-size: 13px; font-weight: 600; color: #e9a13b; min-height: 16px; margin: 8px 0 0; }
+
+/* best stars under each level card's name */
+.level-stars { margin-top: 4px; font-size: 13px; letter-spacing: 3px; }
+
 /* ---- levels page (MM-style level picker, opaque cream screen) ---- */
 #levels {
   position: fixed; inset: 0;
@@ -179,6 +188,8 @@ html, body {
 }
 /* Map 2's desert sand — matches the canvas background under ?level=2 */
 .level-thumb-sand { background: #f0dcae; border: 1px solid #e5d3a8; }
+/* Map 3's deep pastel green — darker than Map 1's meadow, matches ?level=3 */
+.level-thumb-moss { background: #8fbe7d; border: 1px solid #7aa866; }
 
 /* placeholder slot — inert, just shows where future maps will sit */
 .level-ghost { cursor: default; }

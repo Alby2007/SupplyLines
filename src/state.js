@@ -1,5 +1,6 @@
 import { CONFIG } from './config.js';
 import { cellKey } from './grid.js';
+import { riverCells } from './terrain.js';
 
 export function createState() {
   return {
@@ -33,6 +34,8 @@ export function createState() {
     roundaboutGranted: false,
     trafficLights: 0,
     trafficLightGranted: false,
+    bridges: 0,            // water cells a road may cross — Map 3's river kit
+    bridgesGranted: false,
     camera: { x: 0, y: 0 },   // world-space top-left of the 640-tile viewport
     assignClock: CONFIG.food.assignInterval,
     spawnClock: CONFIG.spawn.intervalStart,
@@ -40,14 +43,29 @@ export function createState() {
   };
 }
 
+// a level's terrain as data — water cell set, colours, grid dims. Used by
+// applyLevelFeatures (game boot) and by the levels-screen thumbnails, which
+// paint the same water the map will load with
+export function levelTerrain(level) {
+  const def = CONFIG.levels?.[level];
+  const wdef = def?.water;
+  const CS = CONFIG.grid.cell;
+  const mw = def?.map?.width ?? CONFIG.map.width;
+  const mh = def?.map?.height ?? CONFIG.map.height;
+  const cols = Math.floor(mw / CS), rows = Math.floor(mh / CS);
+  if (!wdef) return { water: new Set(), fill: null, edge: null, cols, rows };
+  const list = wdef.river
+    ? riverCells(wdef.river, cols, rows)
+    : wdef.cells.map(([dx, dy]) => ({ cx: wdef.at.cx + dx, cy: wdef.at.cy + dy }));
+  return { water: new Set(list.map(cellKey)), fill: wdef.fill, edge: wdef.edge, cols, rows };
+}
+
 // materialise the level's terrain (water defs → absolute cell keys)
 export function applyLevelFeatures(state) {
-  const def = CONFIG.levels?.[state.level];
-  if (!def?.water) return;
-  const { at, cells, fill, edge } = def.water;
-  state.water = new Set(cells.map(([dx, dy]) => cellKey({ cx: at.cx + dx, cy: at.cy + dy })));
-  state.waterFill = fill;
-  state.waterEdge = edge;
+  const t = levelTerrain(state.level);
+  state.water = t.water;
+  state.waterFill = t.fill;
+  state.waterEdge = t.edge;
 }
 
 export const nid = (s) => s.nextId++;

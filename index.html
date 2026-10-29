@@ -83,6 +83,14 @@
           </svg>
           <span class="hot-badge" id="hot-light-count">0</span>
         </button>
+        <button id="hot-bridge" class="hot sub hidden" title="Bridges — drawing a road across water spends them">
+          <svg viewBox="0 0 28 28" width="24" height="24">
+            <path d="M4 15 Q14 6 24 15" fill="none" stroke="#8b857c" stroke-width="4" stroke-linecap="round"/>
+            <rect x="3" y="12" width="22" height="4.5" rx="2" fill="#4a453f"/>
+            <path d="M4 22 Q8.5 20 13 22 T22 22" fill="none" stroke="#71b3d6" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="hot-badge" id="hot-bridge-count">0</span>
+        </button>
       </div>
       <canvas id="minimap"></canvas>
     </div>
@@ -96,8 +104,10 @@
   <div id="gameover" class="hidden">
     <div id="gameover-card">
       <h2>Game over</h2>
+      <div id="gameover-stars"></div>
       <p id="gameover-reason"></p>
       <p id="gameover-stats"></p>
+      <p id="gameover-best"></p>
       <button onclick="location.reload()">Play again</button>
     </div>
   </div>
@@ -123,6 +133,10 @@
         <div class="level-card" id="level-map2">
           <div class="level-thumb level-thumb-sand"></div>
           <div class="level-name">Map 2</div>
+        </div>
+        <div class="level-card" id="level-map3">
+          <div class="level-thumb level-thumb-moss"></div>
+          <div class="level-name">Map 3</div>
         </div>
         <div class="level-card level-ghost">
           <div class="level-thumb"></div>
