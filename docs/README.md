@@ -55,6 +55,9 @@ System deep dives, in `systems/`:
 | `src/grid.js` | Cell math: Bresenham paths, metro routing, polyline utils |
 | `src/spawn.js` | Building placement, type/colour choice, colour unlocks |
 | `src/roads.js` | Road nodes/edges, splitting, cell index, bulldozer, snapping |
+| `src/motorways.js` | Elevated motorway anchoring + span building |
+| `src/roundabouts.js` | Roundabout stamping, junction replacement, ghosts |
+| `src/lights.js` | Traffic-light placement, phase groups, ghosts |
 | `src/networks.js` | Lines, junctions, cell indexes, line/junction demolition |
 | `src/routing.js` | Multimodal graph + Dijkstra, congestion, graph cache |
 | `src/agents.js` | Agent update loop, destinations, carpooling, presence counts |

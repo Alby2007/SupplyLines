@@ -4,7 +4,7 @@ import { trainPos, carPos } from './vehicles.js';
 import { congestFactor } from './routing.js';
 import { roadCellCost, slicePolyline, polyLen, demolishRefund } from './roads.js';
 import { linePts } from './networks.js';
-import { cellCenter, routePts } from './grid.js';
+import { cellCenter, cellKey, routePts } from './grid.js';
 
 const INK = '#3d3a36';
 const FAINT = 'rgba(0,0,0,0.05)';
@@ -18,8 +18,9 @@ export function draw(ctx, state, draft, roadDraft, tool, cam, w, h, hover) {
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
   const building = tool != null || draft || roadDraft; // any armed tool = build mode
-  if (building) drawGrid(ctx, cam, w, h, roadDraft);
+  if (building) drawGrid(ctx, cam, w, h);
   else drawDots(ctx, cam, w, h);
+  drawWater(ctx, state);
   // world boundary so the map edge reads while panning
   ctx.strokeStyle = 'rgba(60,55,45,0.3)';
   ctx.lineWidth = 2;
@@ -63,6 +64,7 @@ export function draw(ctx, state, draft, roadDraft, tool, cam, w, h, hover) {
   }
   ctx.restore();
   drawLegend(ctx, h);
+  drawSpawnArrows(ctx, state, cam, w, h); // screen-space pings ride on top
 }
 
 // building key, bottom-left — neutral grey matching the waiting glyphs
@@ -77,13 +79,68 @@ function drawLegend(ctx, h) {
   ctx.font = '12px system-ui, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#6b6560';
+  const rows = items.length + 3; // buildings + the three mini-glyph rows below
   items.forEach(([shape, label], i) => {
-    const y = h - 18 - (items.length - 1 - i) * 22;
+    const y = h - 18 - (rows - 1 - i) * 22;
+    ctx.fillStyle = '#6b6560';
     shapePath(ctx, shape, 26, y, 7);
     ctx.fill();
     ctx.fillText(label, 42, y + 0.5);
   });
+  // the mini glyphs: grey square = a person inside a building (resident,
+  // on-shift worker, or staff); green square = a market's food stock; the
+  // little shape stack beside a building = its waiting queue
+  const minis = [
+    (y) => {
+      ctx.fillStyle = '#6b6560';
+      ctx.fillRect(23, y - 3.5, 7, 7);
+      ctx.fillText('people inside', 42, y + 0.5);
+    },
+    (y) => {
+      ctx.fillStyle = '#7fb069';
+      ctx.fillRect(23, y - 3.5, 7, 7);
+      ctx.fillText('food stock', 42, y + 0.5);
+    },
+    (y) => {
+      ctx.fillStyle = '#6b6560';
+      shapePath(ctx, 'circle', 20, y, 4);
+      ctx.fill();
+      shapePath(ctx, 'square', 29, y, 4);
+      ctx.fill();
+      ctx.fillStyle = '#7fb069';
+      shapePath(ctx, 'hexagon', 38, y, 4);
+      ctx.fill();
+      ctx.fillText('waiting', 46, y + 0.5);
+    },
+  ];
+  minis.forEach((fn, i) => fn(h - 18 - (2 - i) * 22));
+  ctx.restore();
+}
+
+// level terrain: impassable water cells (oasis) — filled blob + shoreline
+function drawWater(ctx, state) {
+  if (!state.water?.size) return;
+  const CS = CONFIG.grid.cell;
+  ctx.save();
+  ctx.fillStyle = state.waterFill ?? '#9fcbe0';
+  for (const k of state.water) {
+    const [cx, cy] = k.split(',').map(Number);
+    ctx.fillRect(cx * CS, cy * CS, CS, CS);
+  }
+  // shoreline: stroke only cell edges whose neighbour isn't water
+  ctx.strokeStyle = state.waterEdge ?? '#7cb2c7';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (const k of state.water) {
+    const [cx, cy] = k.split(',').map(Number);
+    const x = cx * CS, y = cy * CS;
+    const wet = (dx, dy) => state.water.has(`${cx + dx},${cy + dy}`);
+    if (!wet(0, -1)) { ctx.moveTo(x, y + 1.5); ctx.lineTo(x + CS, y + 1.5); }
+    if (!wet(0, 1)) { ctx.moveTo(x, y + CS - 1.5); ctx.lineTo(x + CS, y + CS - 1.5); }
+    if (!wet(-1, 0)) { ctx.moveTo(x + 1.5, y); ctx.lineTo(x + 1.5, y + CS); }
+    if (!wet(1, 0)) { ctx.moveTo(x + CS - 1.5, y); ctx.lineTo(x + CS - 1.5, y + CS); }
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -331,7 +388,8 @@ function drawRoadDraft(ctx, state, rd) {
   const pts = rd.cells.map((c) => cellCenter(c.cx, c.cy));
   const demolish = rd.demolish;
   const cost = demolish ? 0 : roadCellCost(state, rd.cells);
-  const ok = demolish || cost <= state.roadTiles;
+  const wet = rd.cells.some((c) => state.water?.has(cellKey(c)));
+  const ok = demolish || (!wet && cost <= state.roadTiles);
   ctx.save();
   ctx.setLineDash([8, 6]);
   ctx.strokeStyle = demolish ? '#e63946' : ok ? '#8a8a8a' : '#e63946';
@@ -456,6 +514,41 @@ const bRad = (b) =>
     : b.type === 'home' ? CONFIG.buildings.homeRadius
     : b.type === 'junction' ? CONFIG.buildings.junctionRadius
     : CONFIG.buildings.radius;
+
+// off-screen spawn pings: an edge arrow pointing at a freshly spawned
+// building, bobbing toward it in the building's own colour. Fades in fast,
+// out slowly, gone after ~12s — it's a notification, not a permanent marker.
+function drawSpawnArrows(ctx, state, cam, w, h) {
+  const PAD = 26, TTL = 12;
+  for (const b of state.buildings.values()) {
+    if (b.type === 'junction') continue; // player-built — never auto-spawns
+    const age = state.time - (b.bornAt ?? 0);
+    if (age > TTL) continue;
+    const sx = b.x - cam.x, sy = b.y - cam.y;
+    if (sx >= 0 && sx <= w && sy >= 0 && sy <= h) continue; // on screen already
+    const cx = Math.max(PAD, Math.min(w - PAD, sx));
+    const cy = Math.max(PAD, Math.min(h - PAD, sy));
+    const ang = Math.atan2(sy - cy, sx - cx);
+    const bob = Math.sin(state.time * 5 + b.id) * 3.5; // each arrow its own phase
+    const alpha = Math.min(1, age / 0.4) * Math.min(1, (TTL - age) / 2);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.translate(cx + Math.cos(ang) * bob, cy + Math.sin(ang) * bob);
+    ctx.rotate(ang);
+    ctx.fillStyle = PAL(b.color) ?? INK;
+    ctx.strokeStyle = '#f5f2ec';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(11, 0);
+    ctx.lineTo(-5, -7);
+    ctx.lineTo(-2, 0);
+    ctx.lineTo(-5, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
 
 function drawBuilding(ctx, state, b, counts) {
   const r = bRad(b);
@@ -596,4 +689,49 @@ function drawStaff(ctx, state, b) {
       ctx.fillRect(b.x - r - 5 + i * 7, b.y - r - 13, 5, 5);
     }
   }
+}
+
+// whole-map overview for the corner minimap: terrain, roads, buildings, and
+// the camera's viewport rect — drawn in the minimap's own pixel space
+export function drawMinimap(ctx, state, cam, w, h) {
+  const s = w / CONFIG.map.width;
+  ctx.clearRect(0, 0, w, h);
+
+  if (state.water?.size) {
+    ctx.fillStyle = state.waterFill ?? '#9fcbe0';
+    const cs = CONFIG.grid.cell * s;
+    for (const k of state.water) {
+      const [cx, cy] = k.split(',').map(Number);
+      ctx.fillRect(cx * cs, cy * cs, cs + 0.5, cs + 0.5);
+    }
+  }
+
+  const strokeEdges = (filter, style, lw) => {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    for (const e of state.roadEdges.values()) {
+      if (!filter(e)) continue;
+      ctx.moveTo(e.pts[0].x * s, e.pts[0].y * s);
+      for (let i = 1; i < e.pts.length; i++) ctx.lineTo(e.pts[i].x * s, e.pts[i].y * s);
+    }
+    ctx.stroke();
+  };
+  strokeEdges((e) => !e.motorway, '#8a857e', 0.9);
+  strokeEdges((e) => e.motorway, '#b0a99c', 1.1); // spans read as lighter strokes
+
+  for (const b of state.buildings.values()) {
+    if (!b.active) continue;
+    ctx.fillStyle = PAL(b.color) ?? INK;
+    ctx.beginPath();
+    ctx.arc(b.x * s, b.y * s, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // the slice of the world the main canvas is showing right now
+  ctx.fillStyle = 'rgba(255,255,255,0.14)';
+  ctx.fillRect(cam.x * s, cam.y * s, CONFIG.view.width * s, CONFIG.view.height * s);
+  ctx.strokeStyle = 'rgba(61,58,54,0.75)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(cam.x * s, cam.y * s, CONFIG.view.width * s, CONFIG.view.height * s);
 }

@@ -12,6 +12,29 @@ knob, who reads it, and what changing it does.
 | `view.width/height` | 1280×800 | Logical viewport px (canvas is scaled to fit the window) |
 | `grid.cell` | 40 | Cell size px — the quantum for roads, drafts, indexes |
 
+## Levels (`CONFIG.levels`, `applyLevelOverrides`, `applyLevelFeatures`)
+
+Per-map deltas merged onto `CONFIG` at boot by `applyLevelOverrides(level)` —
+the browser (`?level=N`) and `autoplay.mjs` (`--level=N`) both apply it before
+`createState()` so initial values see the overrides. Sections that exist only
+in a level def (e.g. `water`) are created, not merged onto a missing base.
+
+`levels[2]` — the desert map:
+
+| Key | Value | Effect |
+|---|---|---|
+| `map.width` | 3200 | 80×32 cells = 2560 tiles — double Map 1 |
+| `roads.carSpeed` | 110 | Faster cruising compresses the 2× distance (~+22%) |
+| `roads.truckSpeed` | 85 | Milk-truck routes cover more ground (~+21%) |
+| `roads.tilesStart` | 50 | Up from 40 — funds the new-colour onboarding burst |
+| `roads.tilesPerWeek` | 22 | Up from 18, same reason |
+| `water.at/cells` | anchor `{54,11}` + 16 offsets | The oasis — impassable cells, irregular blob |
+| `water.fill/edge` | `#9fcbe0` / `#7cb2c7` | Water colours (shoreline drawn on outer edges) |
+
+`applyLevelFeatures(state)` materialises water defs into `state.water` (a Set
+of cellKeys) — roads, roundabouts, junctions, and building spawns all reject
+water cells; motorways and transit lines can pass over.
+
 ## Spawning (`spawn.js`)
 
 | Key | Default | Effect |
@@ -64,9 +87,10 @@ knob, who reads it, and what changing it does.
 | `yieldLookahead` | 14 | px before a node where junction checks engage |
 | `junctionBox` | 16 | px node radius counted as "in the junction" |
 | `yieldPatience` | 1.5 | s a yielded car waits before nosing in anyway |
+| `turnRadius` | 12 | px — corner fillet radius on vehicle drive paths |
 | `tilesStart` / `tilesPerWeek` / `tilesCap` | 40 / 18 / 99 | Road tile budget |
 
-## Motorways, roundabouts, traffic lights (`roads.js`, `vehicles.js`, `routing.js`)
+## Motorways, roundabouts, traffic lights (`motorways.js`, `roundabouts.js`, `lights.js`, `vehicles.js`, `routing.js`)
 
 Countable items — first of each granted at `unlockWeek`, more via weekly
 picks, `cap` stock ceiling:

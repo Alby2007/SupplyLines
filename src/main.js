@@ -1,16 +1,24 @@
-import { CONFIG } from './config.js';
-import { createState } from './state.js';
+import { CONFIG, applyLevelOverrides } from './config.js';
+import { createState, applyLevelFeatures } from './state.js';
 import * as spawn from './spawn.js';
 import * as economy from './economy.js';
 import * as agents from './agents.js';
 import * as vehicles from './vehicles.js';
 import * as food from './food.js';
 import { initInput, getDraft, getRoadDraft, getTool, getHover, updateCamera } from './input.js';
-import { draw } from './render.js';
+import { draw, drawMinimap } from './render.js';
 import { initUI, updateHUD, showUpgrade, showGameOver } from './ui.js';
 
 const canvas = document.getElementById('game');
+// ?level=N picks the map — per-level CONFIG overrides must apply before
+// createState(), which reads CONFIG fields for initial values
+const level = parseInt(new URLSearchParams(location.search).get('level') ?? '1', 10) || 1;
+applyLevelOverrides(level);
 const state = createState();
+state.level = level;
+applyLevelFeatures(state);
+window.__state = state; // live-state inspection for "why is X happening"
+if (state.level === 2) canvas.style.background = '#f0dcae';
 
 const dpr = window.devicePixelRatio || 1;
 canvas.width = CONFIG.view.width * dpr;
@@ -18,6 +26,18 @@ canvas.height = CONFIG.view.height * dpr;
 fitCanvas();
 const ctx = canvas.getContext('2d');
 ctx.scale(dpr, dpr);
+
+// corner minimap — ~110px tall regardless of the map's aspect
+const minimap = document.getElementById('minimap');
+const MW = CONFIG.map.width * (110 / CONFIG.map.height);
+const MH = 110;
+minimap.width = MW * dpr;
+minimap.height = MH * dpr;
+minimap.style.width = `${MW}px`;
+minimap.style.height = `${MH}px`;
+if (state.level === 2) minimap.style.background = '#f0dcae';
+const mctx = minimap.getContext('2d');
+mctx.scale(dpr, dpr);
 
 function fitCanvas() {
   const availW = window.innerWidth - 32;
@@ -93,6 +113,7 @@ function frame(now) {
     updateCamera(state, 0); // just clamps
   }
   draw(ctx, state, getDraft(), getRoadDraft(), getTool(), state.camera, CONFIG.view.width, CONFIG.view.height, getHover());
+  drawMinimap(mctx, state, state.camera, MW, MH);
   updateHUD(state);
   requestAnimationFrame(frame);
 }

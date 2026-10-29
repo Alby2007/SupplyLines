@@ -1,7 +1,8 @@
 import { CONFIG } from './config.js';
-import { nid } from './state.js';
+import { nid, dist } from './state.js';
 import { roadNodeKey, nodePos, congestFactor, findPathTo } from './routing.js';
-import { polyLen, pointAtLen, lightGroups } from './roads.js';
+import { polyLen, pointAtLen } from './roads.js';
+import { lightGroups } from './lights.js';
 import { lineSegPts, lineSegLen, linesThrough } from './networks.js';
 
 // Arrival resolution: crates stock markets; farm/market arrivals staff shifts;
@@ -108,6 +109,76 @@ export function trainPos(state, v) {
 // ---- road legs → vehicle geometry ----
 // segs[i] = {pts, len, edgeId}; geometry survives edge splits (edgeId may go stale).
 
+// quadratic bezier between two cut points around a corner vertex
+function arcPts(p0, c, p1, k = 5) {
+  const out = [p0];
+  for (let i = 1; i < k; i++) {
+    const t = i / k, mt = 1 - t;
+    out.push({
+      x: mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x,
+      y: mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y,
+    });
+  }
+  out.push(p1);
+  return out;
+}
+
+// replace each interior vertex with a small arc so cars sweep corners instead
+// of snapping direction at the cell grid's hard 90-degree vertices
+function fillet(pts, r) {
+  if (pts.length < 3) return pts;
+  const out = [{ ...pts[0] }];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], p = pts[i], b = pts[i + 1];
+    const da = dist(a, p), db = dist(p, b);
+    const rr = Math.min(r, da * 0.5, db * 0.5);
+    if (rr < 1.5) { out.push({ ...p }); continue; } // too tight — keep the vertex
+    const t0 = { x: p.x + ((a.x - p.x) / da) * rr, y: p.y + ((a.y - p.y) / da) * rr };
+    const t1 = { x: p.x + ((b.x - p.x) / db) * rr, y: p.y + ((b.y - p.y) / db) * rr };
+    out.push(...arcPts(t0, p, t1));
+  }
+  out.push({ ...pts[pts.length - 1] });
+  return out;
+}
+
+// bridge seg boundaries (nodes) where the path turns sharply — the same arc
+// treatment, inserted as a tiny edgeless seg so the turn sweeps through the
+// junction rather than pivoting on the node point
+function joinArcs(segs) {
+  if (segs.length < 2) return segs;
+  const R = CONFIG.roads.turnRadius;
+  const out = [segs[0]];
+  for (let i = 1; i < segs.length; i++) {
+    const prev = out[out.length - 1], next = segs[i];
+    const aPts = prev.pts, bPts = next.pts;
+    let arc = null;
+    if (aPts.length >= 2 && bPts.length >= 2) {
+      const p0 = aPts[aPts.length - 1];
+      const a1 = aPts[aPts.length - 2], b1 = bPts[1];
+      const da = dist(a1, p0), db = dist(p0, b1);
+      const ux = (p0.x - a1.x) / da, uy = (p0.y - a1.y) / da;
+      const vx = (b1.x - p0.x) / db, vy = (b1.y - p0.y) / db;
+      const cosA = ux * vx + uy * vy;
+      // fillet real turns only: nearly-straight pass-throughs and hairpin
+      // reversals keep the node point
+      if (cosA < 0.9 && cosA > -0.4 && da > 2 && db > 2) {
+        const rr = Math.min(R, da * 0.5, db * 0.5);
+        const t0 = { x: p0.x - ux * rr, y: p0.y - uy * rr };
+        const t1 = { x: p0.x + vx * rr, y: p0.y + vy * rr };
+        prev.pts = [...aPts.slice(0, -1), t0];
+        prev.len = Math.max(1, polyLen(prev.pts));
+        next.pts = [t1, ...bPts.slice(1)];
+        next.len = Math.max(1, polyLen(next.pts));
+        const pts = arcPts(t0, p0, t1);
+        arc = { pts, len: Math.max(1, polyLen(pts)), edgeId: null, fwd: true };
+      }
+    }
+    if (arc) out.push(arc);
+    out.push(next);
+  }
+  return out;
+}
+
 export function segsForLeg(state, leg) {
   const segs = [];
   for (let i = 0; i < leg.nodes.length - 1; i++) {
@@ -124,9 +195,10 @@ export function segsForLeg(state, leg) {
       if (!a || !b) continue;
       pts = [a, b];
     }
+    pts = fillet(pts, CONFIG.roads.turnRadius);
     segs.push({ pts, len: Math.max(1, polyLen(pts)), edgeId: e ? e.id : null, fwd });
   }
-  return segs;
+  return joinArcs(segs);
 }
 
 function registerOnEdge(state, v) {

@@ -237,7 +237,8 @@ test('a yielded car eventually noses in — it can’t wait on its own follower'
   const leader = mk(1);
   const follower = mk(2);
   const seg = leader.segs[0];
-  assert.ok(Math.hypot(seg.pts.at(-1).x - junc.x, seg.pts.at(-1).y - junc.y) < 1);
+  // corner fillets trim the seg end back by ≤turnRadius — the arc covers the rest
+  assert.ok(Math.hypot(seg.pts.at(-1).x - junc.x, seg.pts.at(-1).y - junc.y) < CONFIG.roads.turnRadius + 1);
   // leader at the stop line; follower parked 13px behind it — inside the box
   leader.dist = seg.len - 2;
   follower.dist = seg.len - 15;

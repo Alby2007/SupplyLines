@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { CONFIG } from '../src/config.js';
 import { createState } from '../src/state.js';
 import {
-  buildRoad, buildMotorway, demolishRoad, roadCellIndex, polyLen,
+  buildRoad, demolishRoad, roadCellIndex, polyLen,
 } from '../src/roads.js';
+import { buildMotorway } from '../src/motorways.js';
 import { cellOf, cellsBetween, cellKey } from '../src/grid.js';
 import { findPath } from '../src/routing.js';
 import { update as updateVehicles } from '../src/vehicles.js';

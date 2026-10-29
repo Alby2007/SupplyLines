@@ -1,7 +1,10 @@
 import { CONFIG } from './config.js';
 import { addLine, extendLine, endpointLines, addJunction, insertJunction, junctionPlacement, junctionCanJoin, demolishLines } from './networks.js';
 import { addTrain, awardConnectionTrains } from './vehicles.js';
-import { buildRoad, roadCellCost, nearestEdgePoint, demolishRoad, buildMotorway, placeRoundabout, roundaboutGhost, placeTrafficLight, trafficLightGhost } from './roads.js';
+import { buildRoad, roadCellCost, nearestEdgePoint, demolishRoad } from './roads.js';
+import { buildMotorway } from './motorways.js';
+import { placeRoundabout, roundaboutGhost } from './roundabouts.js';
+import { placeTrafficLight, trafficLightGhost } from './lights.js';
 import { dist } from './state.js';
 import { cellOf, cellsBetween, cellKey, clampCell } from './grid.js';
 
@@ -295,6 +298,12 @@ export function initInput(canvas, state, toWorld) {
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
+    // levels page sits above the pause card — Escape here goes back, not resume
+    if (state.levelsMenu) {
+      if (e.key === 'Escape' && !e.repeat) state.levelsMenu = false;
+      e.preventDefault();
+      return;
+    }
     // while the pause menu is up, Escape is the only live key — close + resume
     if (state.pauseMenu) {
       if (e.key === 'Escape' && !e.repeat) { state.pauseMenu = false; state.paused = false; }

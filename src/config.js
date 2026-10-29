@@ -11,6 +11,31 @@ export const CONFIG = {
   grid: {
     cell: 40,               // px — world grid tile size
   },
+  // per-map overrides, applied on top of the base CONFIG at boot (main.js) —
+  // each level may differ in world size, spawn pacing, budgets, etc.
+  levels: {
+    2: {
+      map: { width: 3200, height: 1280 },  // 80×32 cells — double Map 1's tiles
+      // faster cruise compresses the 2× distance; the tile bump covers the
+      // new-colour onboarding burst (a colour lands with ~6 homes + work and
+      // every one needs a road before its commuters exist)
+      roads: { carSpeed: 110, truckSpeed: 85, tilesStart: 50, tilesPerWeek: 22 },
+      // desert oasis: 16 cells of impassable water at a fixed spot — roads
+      // and building spawns can't touch it
+      water: {
+        at: { cx: 54, cy: 11 },
+        cells: [
+          [1, 0], [2, 0],
+          [0, 1], [1, 1], [2, 1], [3, 1],
+          [0, 2], [1, 2], [2, 2], [3, 2], [4, 2],
+          [2, 3], [3, 3], [4, 3],
+          [2, 4], [3, 4],
+        ],
+        fill: '#9fcbe0',             // dusty sky blue, sits easy on the sand
+        edge: '#7cb2c7',
+      },
+    },
+  },
   spawn: {
     intervalStart: 14,      // seconds between new buildings at week 1
     intervalMin: 8,
@@ -53,6 +78,7 @@ export const CONFIG = {
     yieldLookahead: 14,     // px before a node where junction checks engage
     junctionBox: 16,        // px radius around a node that counts as "in the junction"
     yieldPatience: 1.5,     // s a yielded car waits before nosing in anyway
+    turnRadius: 12,         // px — corner fillet radius on vehicle paths
     tilesStart: 40,         // road budget at game start
     tilesPerWeek: 18,       // road budget granted each week
     tilesCap: 99,
@@ -128,5 +154,13 @@ export const CONFIG = {
     boardWait: 3,
   },
 };
+
+// merge a level's overrides onto CONFIG — must tolerate sections that only
+// exist in the level def (e.g. `water`), which is why it's not a bare assign
+export function applyLevelOverrides(level) {
+  for (const [k, v] of Object.entries(CONFIG.levels?.[level] ?? {})) {
+    CONFIG[k] = Object.assign(CONFIG[k] ?? {}, v);
+  }
+}
 
 export const SHAPES = { home: 'circle', work: 'square', farm: 'octagon', market: 'triangle' };

@@ -156,9 +156,14 @@ capped at 9 in stock).
 ## Pause menu
 
 `Esc` opens the pause card (after cancelling any in-progress draft): the sim
-freezes and a centered card offers **Resume** (or `Esc` again) and **Restart**
-(fresh city). While it's open every other hotkey is dead. `Space` and the HUD
-❚❚ button still pause without the menu.
+freezes and a centered card offers **Resume** (or `Esc` again), **Levels**,
+and **Restart**. While it's open every other hotkey is dead. `Space` and the
+HUD ❚❚ button still pause without the menu.
+
+**Levels** opens a full-screen picker: a card per map (green thumb "Map 1",
+white thumb "Map 2" — same world size with a blank white surface, via
+`?level=2`). Picking a card starts a **fresh city** — there's no save, so
+leaving mid-game loses progress. `Esc`/Back returns to the pause card.
 
 ## Automatic behaviour worth knowing
 

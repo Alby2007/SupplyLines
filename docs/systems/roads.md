@@ -1,4 +1,5 @@
-# Roads & traffic (`src/roads.js`, road parts of `src/vehicles.js`)
+# Roads & traffic (`src/roads.js`, `src/motorways.js`, `src/roundabouts.js`,
+`src/lights.js`, road parts of `src/vehicles.js`)
 
 ## Model
 
@@ -61,7 +62,11 @@ and the spatially-restricted `nearestEdgePoint`.
 ## Traffic model (`updateRoadVeh`)
 
 Road vehicles move along `v.segs` — cached per-leg chunks
-`{pts, len, edgeId, fwd}`:
+`{pts, len, edgeId, fwd}`. Corners are **filleted** in `segsForLeg`:
+interior polyline vertices become small quadratic arcs (`turnRadius` px), and
+sharp turns at seg boundaries (nodes) get a micro-arc `edgeId:null` segment
+inserted — so cars sweep bends instead of snapping heading at vertices.
+Nearly-straight pass-throughs and hairpin reversals keep the hard vertex:
 
 - `edgeId` may be **stale** (edge demolished/split after routing): the vehicle
   keeps driving the cached geometry to its destination. **This is

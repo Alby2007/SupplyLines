@@ -12,18 +12,18 @@
 // The sim is the real thing — same modules, same tick order as main.js —
 // so whatever kills the bot is what would kill a player.
 
-import { CONFIG } from './src/config.js';
-import { createState } from './src/state.js';
+import { CONFIG, applyLevelOverrides } from './src/config.js';
+import { createState, applyLevelFeatures } from './src/state.js';
 import * as spawn from './src/spawn.js';
 import * as economy from './src/economy.js';
 import * as food from './src/food.js';
 import * as agents from './src/agents.js';
 import * as vehicles from './src/vehicles.js';
 import { UPGRADES } from './src/ui.js';
-import {
-  buildRoad, roadCellCost, roadCellIndex, placeRoundabout,
-  placeTrafficLight, buildMotorway,
-} from './src/roads.js';
+import { buildRoad, roadCellCost, roadCellIndex } from './src/roads.js';
+import { placeRoundabout } from './src/roundabouts.js';
+import { placeTrafficLight } from './src/lights.js';
+import { buildMotorway } from './src/motorways.js';
 import {
   addLine, addJunction, insertJunction, junctionPlacement,
 } from './src/networks.js';
@@ -40,7 +40,9 @@ const arg = (k, d) => {
 };
 const RUNS = +arg('runs', 0);
 const SEED = +arg('seed', 1);
+const LEVEL = +arg('level', 1);
 const VERBOSE = process.argv.includes('--verbose');
+applyLevelOverrides(LEVEL); // same merge the browser boot does
 const MAX_SECONDS = +arg('maxWeeks', 25) * CONFIG.weekSeconds;
 
 // --tune=demand.growth=0.35,demand.promoteEvery=14 — config overrides for
@@ -96,13 +98,50 @@ const ROWS = Math.floor(CONFIG.map.height / CS);
 
 const served = (b) => b.roadNodeId != null;
 
-// cells a road must not cross — junction buildings reject the whole draw
+// cells a road must not cross — junctions and water reject the whole draw
 function blockedCells(state) {
-  const s = new Set();
+  const s = new Set(state.water ?? []);
   for (const b of state.buildings.values()) {
     if (b.type === 'junction') for (const c of buildingCells(b)) s.add(cellKey(c));
   }
   return s;
+}
+
+// cells of the largest building-anchored road component. Connecting anywhere
+// else just grows an island detached from the city — roadDistancesFrom can't
+// cross components, so an islanded home reads "connected" but starves with
+// no market assignment. Null when no component has buildings yet.
+function mainComponentCells(state, roadIdx) {
+  const comp = new Map(); // edgeId → component id
+  let ncomp = 0;
+  for (const e of state.roadEdges.values()) {
+    if (comp.has(e.id)) continue;
+    const cid = ++ncomp;
+    const stack = [e.id];
+    comp.set(e.id, cid);
+    while (stack.length) {
+      const cur = state.roadEdges.get(stack.pop());
+      for (const nid of [cur.a, cur.b]) {
+        for (const eid of state.roadNodes.get(nid)?.edges ?? []) {
+          if (!comp.has(eid)) { comp.set(eid, cid); stack.push(eid); }
+        }
+      }
+    }
+  }
+  const score = new Map(); // comp → building-attached nodes
+  for (const n of state.roadNodes.values()) {
+    if (n.bid == null || !n.edges.length) continue;
+    const cid = comp.get(n.edges[0]);
+    if (cid != null) score.set(cid, (score.get(cid) ?? 0) + 1);
+  }
+  let best = null, n = 0;
+  for (const [cid, s] of score) if (s > n) { n = s; best = cid; }
+  if (best == null) return null;
+  const goal = new Map();
+  for (const [k, refs] of roadIdx) {
+    if (refs.some((r) => comp.get(r.edgeId) === best)) goal.set(k, refs);
+  }
+  return goal;
 }
 
 // tiny binary heap keyed by .d
@@ -122,8 +161,10 @@ function heap() {
 
 // dijkstra over grid cells: reusing existing road costs ~0 — it spends tiles
 // the way a good player would, consolidating onto established streets.
+// goalIdx narrows which road cells count as landings (default: any).
 // Returns a cell path (building → road), or null.
-function pathToRoad(state, fromCells, roadIdx, blocked) {
+function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null) {
+  const goal = goalIdx ?? roadIdx;
   const dist = new Map();
   const prev = new Map();
   const pq = heap();
@@ -136,7 +177,7 @@ function pathToRoad(state, fromCells, roadIdx, blocked) {
   while (pq.size) {
     const cur = pq.pop();
     if (cur.d > (dist.get(cur.k) ?? Infinity)) continue;
-    if (roadIdx.has(cur.k)) { found = cur; break; }
+    if (goal.has(cur.k)) { found = cur; break; }
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         if (!dx && !dy) continue;
@@ -191,9 +232,18 @@ function tryConnect(state, b, log) {
     }
     if (!other) return false;
     cells = cellsBetween(cellOf(b), cellOf(other));
+    // the straight draw may cross water — buildRoad rejects the whole path,
+    // so reroute around the blockage with the grid Dijkstra instead
+    const blk = blockedCells(state);
+    if (cells.some((c) => blk.has(cellKey(c)))) {
+      const goal = new Map(buildingCells(other).map((c) => [cellKey(c), []]));
+      cells = pathToRoad(state, own, goal, blk) ?? cells;
+    }
   } else {
     if (process.env.BOTTRACE) console.log(`pathToRoad start ${b.type}#${b.id}`);
-    cells = pathToRoad(state, own, roadIdx, blockedCells(state));
+    // land on the main network, not just any road — island stubs don't count
+    const goal = mainComponentCells(state, roadIdx);
+    cells = pathToRoad(state, own, roadIdx, blockedCells(state), goal);
     if (process.env.BOTTRACE) console.log(`pathToRoad done ${b.type}#${b.id} cells=${cells?.length}`);
   }
   if (!cells || cells.length < 2) return false;
@@ -751,6 +801,8 @@ function postmortem(state, warn, arrivals) {
 function run(seed, verbose) {
   Math.random = srand(seed);
   const state = createState();
+  state.level = LEVEL;
+  applyLevelFeatures(state);
   const events = [];
   const log = (s) => {
     events.push({ t: +state.time.toFixed(1), week: state.week, s });

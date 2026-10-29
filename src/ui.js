@@ -107,10 +107,20 @@ export function initUI(state) {
     pauseMenu: document.getElementById('pausemenu'),
     pauseResume: document.getElementById('pause-resume'),
     pauseRestart: document.getElementById('pause-restart'),
+    pauseLevels: document.getElementById('pause-levels'),
+    levels: document.getElementById('levels'),
+    levelsBack: document.getElementById('levels-back'),
+    levelMap1: document.getElementById('level-map1'),
+    levelMap2: document.getElementById('level-map2'),
   };
   el.pause.addEventListener('click', () => { state.paused = !state.paused; });
   el.pauseResume.addEventListener('click', () => { state.pauseMenu = false; state.paused = false; });
   el.pauseRestart.addEventListener('click', () => location.reload());
+  el.pauseLevels.addEventListener('click', () => { state.levelsMenu = true; });
+  el.levelsBack.addEventListener('click', () => { state.levelsMenu = false; });
+  // no save system — picking a level is a fresh city, mid-game progress is lost
+  el.levelMap1.addEventListener('click', () => { location.href = location.pathname; });
+  el.levelMap2.addEventListener('click', () => { location.href = location.pathname + '?level=2'; });
   el.s1.addEventListener('click', () => { state.speed = 1; });
   el.s2.addEventListener('click', () => { state.speed = 2; });
   el.hotLine.addEventListener('click', () => setTool('line'));
@@ -142,6 +152,7 @@ export function updateHUD(state) {
   el.freight.textContent = `${state.freightDelivered} food`;
   el.pause.innerHTML = state.paused ? '&#9654;' : '&#10074;&#10074;';
   el.pauseMenu.classList.toggle('hidden', !state.pauseMenu);
+  el.levels.classList.toggle('hidden', !state.levelsMenu);
   el.s1.classList.toggle('on', state.speed === 1);
   el.s2.classList.toggle('on', state.speed === 2);
   const tool = getTool();

@@ -102,9 +102,10 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
   const minCells = Math.ceil(CONFIG.spawn.minDist / CS); // spacing in cells
   // candidate cell bounds — region constrains seeds to the map's middle
   const R = region ?? { cx0: m, cx1: cols - m - 1, cy0: m, cy1: rows - m - 1 };
-  // tiles claimed by roads or transit lines are off-limits for new buildings
+  // tiles claimed by roads, transit lines, or water are off-limits
   const blocked = new Set(roadCellIndex(state).keys());
   for (const k of lineCellIndex(state)) blocked.add(k);
+  for (const k of state.water ?? []) blocked.add(k);
   let pos = null;
   for (let i = 0; i < CONFIG.spawn.maxTries; i++) {
     // works occupy a 2×2 cell block centred on a grid vertex; other buildings
@@ -157,6 +158,7 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
     capacity: CONFIG.buildings.capacity,
     overflowT: 0,
     active: instant,
+    bornAt: state.time,  // spawn-ping arrows show while the building is fresh
     openAt: instant ? 0 : state.time + CONFIG.spawn.warnTime,
     spawnClock: CONFIG.commuters.interval * Math.random(),
     workers: [],       // shift timers — farms/markets operate when staffed

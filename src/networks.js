@@ -203,7 +203,7 @@ export function junctionPlacement(state, p, snapPx = CONFIG.junctions.snap) {
   for (const b of state.buildings.values()) {
     if (buildingCells(b).some((bc) => cellKey(bc) === k)) return null;
   }
-  if (roadCellIndex(state).has(k)) return null; // don't sit on top of a road
+  if (roadCellIndex(state).has(k) || state.water?.has(k)) return null; // not on roads or water
   const cc = cellCenter(c.cx, c.cy);
   return { line: hit.line, segIdx: hit.segIdx, x: cc.x, y: cc.y };
 }

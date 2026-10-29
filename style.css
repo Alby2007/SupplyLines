@@ -61,6 +61,15 @@ html, body {
 }
 #subbar.hidden, #roadbar.hidden { display: none; }
 
+#minimap {
+  position: absolute; right: 10px; bottom: 10px;
+  background: #dce9cf;             /* matches the map surface; Map 2 overrides in main.js */
+  border: 1px solid rgba(0,0,0,0.14);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  pointer-events: none;            /* never eats a camera drag or tool click */
+}
+
 .hot.sub { width: 40px; height: 40px; border-radius: 9px; }
 
 #hotbar {
@@ -109,7 +118,7 @@ html, body {
   background: rgba(40,40,40,0.35);
   display: flex; align-items: center; justify-content: center;
 }
-#modal.hidden, #gameover.hidden, #pausemenu.hidden { display: none; }
+#modal.hidden, #gameover.hidden, #pausemenu.hidden, #levels.hidden { display: none; }
 
 #modal-card, #gameover-card, #pause-card {
   background: #f5f2ec; border-radius: 12px;
@@ -133,3 +142,59 @@ html, body {
   border-radius: 8px; cursor: pointer;
 }
 #gameover-card button:hover { background: #c1121f; }
+
+/* ---- levels page (MM-style level picker, opaque cream screen) ---- */
+#levels {
+  position: fixed; inset: 0;
+  background: #f5f2ec;
+}
+#levels-inner {
+  height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 28px;
+}
+#levels-title {
+  font-size: 28px; font-weight: 600; color: #3d3a36;
+}
+#level-grid { display: flex; gap: 32px; }
+
+.level-card {
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.level-thumb {
+  width: 190px; height: 190px;
+  background: #dce9cf;            /* the map's own pastel green */
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  transition: box-shadow 0.12s;
+}
+.level-card:hover { transform: translateY(-3px); }
+.level-card:hover .level-thumb { box-shadow: 0 6px 18px rgba(0,0,0,0.16); }
+.level-name {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 15px; font-weight: 600; color: #3d3a36;
+}
+/* Map 2's desert sand — matches the canvas background under ?level=2 */
+.level-thumb-sand { background: #f0dcae; border: 1px solid #e5d3a8; }
+
+/* placeholder slot — inert, just shows where future maps will sit */
+.level-ghost { cursor: default; }
+.level-ghost .level-thumb {
+  background: transparent;
+  border: 2px dashed #d6d2c8;
+  box-shadow: none;
+}
+.level-ghost .level-name { color: #8f8a7d; font-weight: 500; }
+.level-ghost:hover { transform: none; }
+.level-ghost:hover .level-thumb { box-shadow: none; }
+
+#levels-back {
+  position: absolute; top: 18px; left: 20px;
+  padding: 8px 16px; font-size: 14px;
+  border: 2px solid #457b9d; background: transparent; color: #2a4a5e;
+  border-radius: 8px; cursor: pointer;
+}
+#levels-back:hover { background: #457b9d; color: #fff; }

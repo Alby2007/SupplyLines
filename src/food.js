@@ -39,7 +39,11 @@ export function update(state, dt) {
   }
 }
 
-// each home is served by its nearest road-reachable SAME-COLOUR market
+// each home is served by its nearest road-reachable SAME-COLOUR market —
+// preferring markets that can actually roll trucks. An unstaffed market
+// dispatches nothing (workers are the drivers), so homes near a dead market
+// get reassigned to the next-nearest staffed one; unstaffed only wins when
+// nothing staffed can reach.
 function assignHomes(state) {
   const byColor = new Map();
   for (const h of state.buildings.values()) {
@@ -49,16 +53,21 @@ function assignHomes(state) {
     }
   }
   for (const [color, homes] of byColor) {
-    const markets = [...state.buildings.values()].filter(
+    const all = [...state.buildings.values()].filter(
       (b) => b.type === 'market' && b.active && b.color === color,
     );
-    const { dist, src } = markets.length
-      ? roadDistancesFrom(state, markets.map((m) => m.id))
-      : { dist: new Map(), src: new Map() };
+    const staffed = all.filter((m) => m.workers.length > 0);
+    const reach = (ms) => (ms.length ? roadDistancesFrom(state, ms.map((m) => m.id)) : null);
+    const prim = reach(staffed);
+    const back = staffed.length === all.length ? null : reach(all);
+    const pick = (rs, bid) => {
+      const d = rs?.dist.get(`b${bid}`);
+      return d != null && d !== Infinity ? { m: rs.src.get(`b${bid}`), d } : null;
+    };
     for (const h of homes) {
-      const d = dist.get(`b${h.id}`);
-      h.assignedMarket = d != null && d !== Infinity ? src.get(`b${h.id}`) : null;
-      h.marketDist = d ?? Infinity;
+      const r = pick(prim, h.id) ?? pick(back, h.id);
+      h.assignedMarket = r?.m ?? null;
+      h.marketDist = r?.d ?? Infinity;
     }
   }
 }

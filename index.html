@@ -84,6 +84,7 @@
           <span class="hot-badge" id="hot-light-count">0</span>
         </button>
       </div>
+      <canvas id="minimap"></canvas>
     </div>
   </div>
   <div id="modal" class="hidden">
@@ -105,7 +106,28 @@
       <h2>Paused</h2>
       <div id="pause-options">
         <button id="pause-resume">Resume</button>
+        <button id="pause-levels">Levels</button>
         <button id="pause-restart">Restart</button>
+      </div>
+    </div>
+  </div>
+  <div id="levels" class="hidden">
+    <button id="levels-back">&#8592; Back</button>
+    <div id="levels-inner">
+      <h2 id="levels-title">Levels</h2>
+      <div id="level-grid">
+        <div class="level-card" id="level-map1">
+          <div class="level-thumb"></div>
+          <div class="level-name">Map 1</div>
+        </div>
+        <div class="level-card" id="level-map2">
+          <div class="level-thumb level-thumb-sand"></div>
+          <div class="level-name">Map 2</div>
+        </div>
+        <div class="level-card level-ghost">
+          <div class="level-thumb"></div>
+          <div class="level-name">More cities soon</div>
+        </div>
       </div>
     </div>
   </div>
