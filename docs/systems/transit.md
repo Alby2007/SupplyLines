@@ -91,10 +91,13 @@ A junction is a building: `type:'junction'`, neutral-or-line colour, capacity
 
 ## Freight flow (rail side)
 
-A crate agent at a farm prefers markets **on the same freight line** (computed
-per-call by `crateMatchers`); any market is the fallback. Crates board only
-`freight:true` line edges; capacity is `crateCap` crates per `(1 + wagons)`
-wagons (`wagons` grows via the Cargo wagon upgrade).
+A crate agent at a farm targets, in order: markets whose assigned homes are
+going **hungry** (under a truckload of stock), then markets **on the same
+freight line**, then any market — the full `crateMatchers` ordering lives in
+[agents.md](agents.md). Crates board only `freight:true` line edges; capacity
+is `crateCap` crates per `(1 + wagons)` wagons (`wagons` grows via the Cargo
+wagon upgrade). When the farm's queue backs up, crates take the road instead
+of waiting for rail.
 
 ## Demolition (`demolishLines` / `deleteLine` / `removeJunction`)
 

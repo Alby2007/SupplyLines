@@ -20,9 +20,13 @@ Per `agents.update(dt)`:
    building they're parked in.
 2. Riders (`loc` not a number) skip — vehicles own them.
 3. `a.wait` accumulates; `pathV !== netVersion` invalidates `legs`.
-4. No legs → `findPath` through each matcher until one returns a route
-   (people pass `{lineColor: a.color}`, crates `{freight:true}`); `retryT = 2`
-   regardless, so post-edit recomputes are throttled.
+4. No legs → `findPath` through each matcher until one returns a route.
+   People pass `{lineColor: a.color}`; crates pass `{freight:true}` — **unless
+   the farm's waiting queue has ≥4 crates**, in which case they first try
+   road-only (`{freight:true, modes:{line:false, road:true}}`) so produce
+   spills onto trucks instead of rotting behind a congested railway, falling
+   back to unrestricted routing when no market is road-reachable.
+   `retryT = 2` regardless, so post-edit recomputes are throttled.
 5. `legs[0].mode === 'road'` → immediate departure: `spawnCar` builds the
    vehicle from the leg's cached segments, then the **carpool** pass.
 
@@ -62,12 +66,31 @@ travel. Offices behave identically, keeping the two systems consistent.
 
 Matchers tried in order:
 
-1. `understaffedFor(color)` — active farms (any colour — they're neutral) or
-   same-colour markets with `workers.length < workersNeeded + 1`. Workers
-   prefer the food chain over offices at any distance.
+1. `understaffedFor(color)` — active farms (any colour — they're neutral)
+   below `workersNeeded` (2 — exactly what production requires, no spare),
+   or same-colour markets below `min(trucks, workersNeeded*2)` — market staff
+   are truck drivers, so staffing keeps attracting until every truck can
+   roll (which is what makes a "+1 market truck" upgrade actually work).
+   Workers prefer the food chain over offices at any distance.
 2. `officeFor(color)` — active same-colour workplaces.
 
 Falls through to `null` legs → waits, retries every 2s.
+
+## Where crates want to go (`crateMatchers`)
+
+Computed per-call at path time, matchers in order:
+
+1. `hungryMarketMatch` — an active market below one truckload of stock
+   (`stock < milkCap`) whose **assigned homes are going hungry**
+   (`hungerT > hungryAt`). Needy markets win crates regardless of transport
+   mode — a nearest-market rule would funnel every crate into one colour and
+   starve the rest with staffed, empty markets.
+2. Markets **on the same freight line** as the farm (skipped entirely when
+   the farm has no freight line).
+3. `marketMatch` — any active market.
+
+Combined with the farm-queue road spill (step 4 above): crates prefer rail
+when it's free, spill onto the road when it isn't.
 
 ## `presenceCounts`
 
@@ -86,3 +109,6 @@ be a per-building agent scan.
 - A rider whose destination junction was bulldozed has `legs[0].to` pointing at
   a dead id → `removeJunction` nulls their legs and `exchange()`'s stranded
   branch drops them at the next stop.
+- `a.legs` cleared **mid-car-ride** (e.g. a roundabout replaced a node on the
+  route) → `arriveCar` alights the passengers at wherever the car physically
+  stopped and lets them repath, instead of crashing on the missing leg.

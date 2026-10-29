@@ -37,7 +37,7 @@ knob, who reads it, and what changing it does.
 | `commuters.jitter` | 0.6 | `1 ± jitter` multiplier on the interval |
 | `homes.residents` | 2 | People "out" per home cap **and** carpool cap |
 | `work.shiftLen` | 25 | Seconds an office worker stays before heading home |
-| `food.shiftLen` | 75 | Seconds a farm/market worker stays |
+| `food.shiftLen` | 120 | Seconds a farm/market worker stays |
 
 ## Trains (`networks.js`, `vehicles.js`)
 
@@ -66,19 +66,37 @@ knob, who reads it, and what changing it does.
 | `yieldPatience` | 1.5 | s a yielded car waits before nosing in anyway |
 | `tilesStart` / `tilesPerWeek` / `tilesCap` | 40 / 18 / 99 | Road tile budget |
 
+## Motorways, roundabouts, traffic lights (`roads.js`, `vehicles.js`, `routing.js`)
+
+Countable items — first of each granted at `unlockWeek`, more via weekly
+picks, `cap` stock ceiling:
+
+| Key | Default | Effect |
+|---|---|---|
+| `motorways.speedFactor` | 1.6 | Cruise-speed multiplier on the elevated edge (drive + path cost) |
+| `motorways.unlockWeek` | 4 | First span granted when this week begins |
+| `motorways.cap` | 9 | Stock cap |
+| `motorways.width` | 18 | Rendered span width px |
+| `roundabouts.unlockWeek` | 4 | First ring granted |
+| `roundabouts.cap` | 9 | Stock cap |
+| `roundabouts.radius` | 17 | Ring centre to ring nodes px |
+| `trafficLights.unlockWeek` | 4 | First light granted |
+| `trafficLights.cap` | 9 | Stock cap |
+| `trafficLights.phase` | 2.2 | Seconds each arm group holds green |
+
 ## Food (`food.js`, `vehicles.js`)
 
 | Key | Default | Effect |
 |---|---|---|
-| `produceInterval` | 6 | Seconds per crate at a staffed farm |
+| `produceInterval` | 4 | Seconds per crate at a staffed farm |
 | `workersNeeded` | 2 | Workers to fully staff a farm/market |
 | `stockpileCap` | 10 | Defined but currently unused (no stock ceiling enforced) |
 | `hungerLimit` | 90 | s a home can go unfed → starve game over |
 | `pantryStart` | 30 | Negative `hungerT` head start on new homes |
-| `hungryAt` | 20 | Dispatch ignores homes under this hunger |
+| `hungryAt` | 20 | Dispatch ignores homes under this hunger; also the crate-routing threshold for "hungry market" |
 | `marketTrucksStart` | 3 | Milk trucks per market |
 | `marketServeCap` | 5 | Defined but currently unused (no per-truck serve cap enforced) |
-| `milkCap` | 3 | Deliveries per milk-truck run |
+| `milkCap` | 4 | Deliveries per milk-truck run |
 | `crateCap` | 4 | Crates per cargo wagon |
 | `dispatchInterval` | 2 | s between market dispatch checks |
 | `assignInterval` | 3 | s between home→market reassignment |
@@ -101,8 +119,8 @@ knob, who reads it, and what changing it does.
 | `demand.relief` | 18 | s of demand each worker arrival clears |
 | `demand.limit` | 90 | meter full → "understaffed" game over |
 | `demand.grace` | 15 | new workplaces start with this much slack |
-| `demand.growth` | 0.5 | extra rate per level (L3 = 2× rate) |
-| `demand.promoteEvery` | 8 | arrivals per level |
+| `demand.growth` | 0.3 | extra rate per level (L3 = 1.6× rate) |
+| `demand.promoteEvery` | 14 | arrivals per level |
 | `demand.maxLevel` | 3 | level cap |
 | `overflowLimit` | 25 | s at/over capacity → game over (decays at 1.5×) |
 

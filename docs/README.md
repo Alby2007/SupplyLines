@@ -10,7 +10,8 @@ modules + HTML5 Canvas. No build step, no dependencies.
 python3 serve.py        # http://localhost:8000 (adds no-store headers)
 # or
 python3 -m http.server 8000
-npm test                # 88 tests, node:test, runs in ~1s
+npm test                # 110 tests, node:test, runs in ~1s
+node autoplay.mjs --runs=12   # headless bot plays seeded games + postmortems
 ```
 
 Open `index.html` through a local server — ES modules won't load from `file://`.
@@ -22,16 +23,18 @@ one every few seconds. You draw **roads** between them from a limited tile
 budget and **transit lines** between buildings from a limited line count.
 Residents commute to work; workplaces fill a demand meter while understaffed.
 From week 2, farms produce crates that must reach markets, and markets dispatch
-milk trucks to homes that are getting hungry. Let any meter fill — workplace
-demand, home hunger, or waiting-room overflow — and it's game over. Each
-60-second week grants road tiles and an upgrade pick.
+milk trucks to homes that are getting hungry. From week 4 the road toolkit
+grows Mini Motorways-style hardware — **roundabouts**, **traffic lights**, and
+**motorways** as countable items. Let any meter fill — workplace demand, home
+hunger, or waiting-room overflow — and it's game over. Each 60-second week
+grants road tiles and an upgrade pick.
 
 ## Contents
 
 - [gameplay.md](gameplay.md) — controls, tools, buildings, meters, how to win/lose
 - [architecture.md](architecture.md) — module map, the state object, tick loop, invariants
 - [configuration.md](configuration.md) — every `CONFIG` knob and what reads it
-- [testing.md](testing.md) — test suite layout, conventions, how to add tests
+- [testing.md](testing.md) — test suite layout, conventions, the headless autoplayer
 
 System deep dives, in `systems/`:
 
@@ -62,3 +65,4 @@ System deep dives, in `systems/`:
 | `src/render.js` | Canvas drawing |
 | `src/ui.js` | HUD, upgrade modal, game-over card |
 | `src/main.js` | Fixed-step loop, wiring |
+| `autoplay.mjs` | Headless autoplayer — drives the real sim, prints postmortems |

@@ -6,26 +6,39 @@ the same commuters that run offices. It starts at `week >= foodStartWeek` (2).
 ## Staffing
 
 Farms and markets don't run themselves — they hold shift timers in
-`b.workers[]` (one entry per worker, `food.shiftLen` = 75s each, decayed in
+`b.workers[]` (one entry per worker, `food.shiftLen` = 120s each, decayed in
 `food.update`). The arriving worker's **agent is parked** at the building with
 `workingAt` set, and commutes home when the shift ends (see
 [agents](agents.md)) — the resident slot at home stays occupied the whole
 round trip.
 
-- **Farm** produces a crate every `produceInterval` (6s) while
+- **Farm** produces a crate every `produceInterval` (4s) while
   `workers.length >= workersNeeded` (2). All-or-nothing.
 - **Market** dispatches trucks gated per worker (see below) — degrades
   gracefully rather than all-or-nothing.
 - Agent capacity is `workersNeeded*2` — a couple extra staff can overlap
   before the shift timers rotate out.
+- **Attraction** (in agents.js) matches function: farms pull workers only
+  while below `workersNeeded`; markets pull while below
+  `min(trucks, workersNeeded*2)` — staff are truck drivers, so a market
+  staffs up to its truck count and a "+1 truck" upgrade actually lands.
 
 ## Crates
 
 Farm spawn: `spawnAgent(b, 'crate', marketMatch)` — dest overridden at path
-time by `crateMatchers`, which prefers markets **on the farm's freight line**
-(product rides the railway it was loaded onto), falling back to any active
-market. Crates ride `foodTruck`s on road legs or freight wagons on lines —
-never passenger cars. On arrival at a market: `b.stock++`,
+time by `crateMatchers`:
+
+1. `hungryMarketMatch` — a market under a truckload of stock whose assigned
+   homes are going hungry gets crates **first** (the old nearest-market rule
+   funnelled all produce into one colour and starved every other).
+2. Markets on the farm's own **freight line** — product rides the railway it
+   was loaded onto.
+3. Any active market.
+
+Crates ride `foodTruck`s on road legs or freight wagons on lines — never
+passenger cars. When the farm's own waiting queue hits ~4 crates they switch
+to **road-first** routing (unrestricted as fallback), so a single congested
+freight train can't rot the farm. On arrival at a market: `b.stock++`,
 `freightDelivered++`, agent deleted.
 
 ## Home → market assignment
@@ -49,7 +62,7 @@ Every `dispatchInterval` (2s) per market:
   just one truck at a time. An unstaffed market stalls completely.
 - Targets = assigned homes with `hungerT > hungryAt` (20s), sorted hungriest
   first — deliveries triage the most desperate homes.
-- `load = min(stock, milkCap(3), targets.length)`; stock decrements on spawn.
+- `load = min(stock, milkCap(4), targets.length)`; stock decrements on spawn.
 
 ## Milk trucks (`spawnMilkTruck` → `milkArrive`)
 

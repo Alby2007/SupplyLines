@@ -34,7 +34,9 @@ interval = max(intervalMin, intervalStart - (week-1) * intervalRamp)
 - Workplaces occupy a **2×2 cell block** centred on a grid vertex; all other
   types take the single cell containing their centre.
 - Candidate cells are rejected if covered by `roadCellIndex` or
-  `lineCellIndex` — buildings never spawn on roads or track.
+  `lineCellIndex` — buildings never spawn on roads or track. Roundabout
+  islands count: interior cells index to the ring's arcs, so nothing spawns
+  inside a roundabout.
 - **Spacing**: any building cell within `minDist` (→cells, Chebyshev) of an
   existing building cell rejects.
 - **Reach**: at least one existing building must be within `cityReach` cells —

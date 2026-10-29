@@ -40,6 +40,12 @@ An edge split at marks `t[]` (arclength fractions):
 - Marks are coalesced: marks closer than ~1px-equivalent (`minGap`, scaled to
   the edge's length) share one node — near-coincident split points can't birth
   degenerate stubs.
+- **Near-endpoint guard** — every split entry point (`buildRoad`'s cell-touch
+  splits, `anchorAt`, `motorwayAnchor`) skips a split landing within snap of
+  an existing node. Without it, re-drawing over a shared corridor splits the
+  already-split slivers at slightly different `t` — edges multiplied
+  exponentially until OOM (a real bug the autoplayer's reuse-hungry pathing
+  exposed).
 - Each chunk is `slicePolyline`d; chunks whose polyline length is ≤ ~1px are
   replaced by a **stub edge** linking the two distinct nodes — connectivity is
   never silently broken, even when two joins land at the same arclength
@@ -94,8 +100,63 @@ also means junction-box checks use the visual position.
 - Takes dragged **cells**; deletes every edge whose polyline passes through
   them; returns the count of tiles no longer covered (refunded to
   `state.roadTiles`, capped at `tilesCap`).
+- **Roundabouts are atomic** — touching any arc (or an interior island cell,
+  which indexes to its arcs) deletes the whole ring. Ring cells refund no
+  tiles — the item cost isn't refundable.
+- **Traffic lights refund** — a lit junction that loses all its roads returns
+  the light to `state.trafficLights`.
 - **Orphan sweep**: road nodes with no remaining edges are removed — except
   building driveway nodes (`bid != null`), which persist so buildings stay
   reconnectable.
 - Bumps `netVersion`. Line/junction demolition is a separate pass
   (`demolishLines` in networks.js).
+
+## Motorways (`buildMotorway`, `motorwayAnchor`)
+
+An elevated express edge — one RoadEdge with `motorway: true`:
+
+- **Anchoring is mandatory both ends** — unlike `anchorAt` there's no
+  free-point fallback: building > node > split edge, or the build fails.
+- Free-form polyline, **no cells** — `roadCellIndex` skips motorway edges, so
+  they cost zero tiles, never intersect surface edges (no splits/joins on
+  crossing), and don't block building spawns.
+- Vehicles on it cruise at `carSpeed × motorways.speedFactor` (1.6×) and the
+  same factor feeds `buildGraph`'s road-edge cost, so routing prefers it.
+- Countable item: first span at `motorways.unlockWeek` (4), `cap` 9.
+
+## Roundabouts (`placeRoundabout`, `stampRing`, `buildRoundabout`)
+
+An 8-node **one-way circulating ring** (`e.oneway = true`,
+`e.roundabout = {x,y}` on every arc edge):
+
+- **On a junction**: replaces the node — each incident edge is re-pointed to a
+  ring node along its approach ray. **On a road edge**: the edge splits and
+  both halves feed the ring. **On open ground**: standalone ring centred on
+  the grid; roads drawn to it join normally.
+- Interior **island cells** index to the ring's arcs in `roadCellIndex`, so a
+  road ending inside the circle connects — and buildings can't spawn inside
+  (spawn rejects indexed cells).
+- Ring edges never yield (`!e.roundabout` skips the junction check);
+  circulation is one-way and free-flowing. Entering approaches yield like any
+  junction.
+- Rejected on buildings and on existing rings (no stacking).
+
+## Traffic lights (`placeTrafficLight`, `lightGroups`)
+
+A `light` object installed on a **pure** road node — `bid == null`, ≥3 arms,
+no roundabout edges (a light inside a ring would stop circulating traffic):
+
+- `lightGroups` sorts incident edges by approach angle and pairs
+  ~opposite-facing arms (`|d−π| < 0.55` rad) into phases — N-S together, E-W
+  together.
+- `vehicles.update` rotates `L.idx` every `trafficLights.phase` (2.2s). If the
+  arm count changed (a new road drawn in), groups regroup and `idx` wraps —
+  an **ungrouped arm counts as green** (`armGreen`), so a fresh spoke can
+  never be red forever.
+- A red-armed car holds `rem − 2` px from the stop line **unconditionally** —
+  this replaces the yield rule at that junction and fixes dominant-road
+  starvation: every arm gets a guaranteed turn. Patience cap = full cycle +1s
+  (`groups.length × phase + 1`), same deadlock-breaking role as
+  `yieldPatience`.
+- `placeTrafficLight` toggles: click a lit junction → removed and refunded;
+  `canAdd` gates installs on `state.trafficLights` stock.

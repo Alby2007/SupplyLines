@@ -52,12 +52,15 @@ there's no store, no classes, just plain objects in Maps keyed by integer id
   vehicles: Map<id, Vehicle>,        // cars, foodTruck, milkTruck, train
   nextId,                            // id allocator
   delivered, freightDelivered,       // score counters
-  gameOver, paused, speed,
+  gameOver, paused, pauseMenu, speed,
   upgradePending,                    // weekly modal gate
   netVersion,                        // THE invalidation counter — see below
   unlockedColors: [0],               // palette indexes, ratchet
   colorSeedQueue: [],                // pending forced spawns after unlocks
   maxLines, roadTiles, roadCapBonus, // budgets
+  motorways, motorwayGranted,        // item stock + first-grant flag (week 4)
+  roundabouts, roundaboutGranted,
+  trafficLights, trafficLightGranted,
   camera: {x, y},
   assignClock, spawnClock,           // subsystem timers
 }
@@ -78,7 +81,11 @@ agents.
 wagons, freight`. `stops` is ordered; loops have no duplicated endpoint.
 
 **RoadNode** — `id, x, y, bid|null` (`bid` set when the node is a building's
-driveway). **RoadEdge** — `id, a, b` (node ids), `pts`, `vehicles:Set<vid>`.
+driveway), `light?` (`{groups, idx, t, edgeCount}` — installed traffic-light
+phases). **RoadEdge** — `id, a, b` (node ids), `pts`, `vehicles:Set<vid>`,
+plus flags: `motorway` (elevated express edge), `oneway` (roundabout ring
+arcs), `roundabout:{x,y}` (ring membership — used for atomic demolition and
+yield rules).
 
 **Agent** — `id, kind:'person'|'crate', color, home, dest, loc, legs, pathV,
 retryT, wait, workingAt?, shiftT?`. `loc` is a **building id** while waiting or
@@ -114,11 +121,18 @@ vehicles.update(state, dt);  // trains then road vehicles; arrivals
 Rendering (`draw`) and `updateHUD` run once per `requestAnimationFrame`,
 decoupled from sim steps.
 
+The accumulator is gated by `!state.paused && !state.gameOver &&
+!state.upgradePending` — three separate pause sources: `paused` (Space, HUD
+button, or the Esc **pause menu**, which also sets `pauseMenu` to show its
+card), `gameOver`, and the weekly upgrade modal. The camera keeps panning
+while paused.
+
 ## The `netVersion` contract
 
 `state.netVersion` is bumped by **every** mutation to routable structure:
-buildRoad, splitEdgeMulti, demolishRoad, addLine, extendLine, insertJunction,
-removeJunction, deleteLine. Two families of consumers read it:
+buildRoad, splitEdgeMulti, demolishRoad, buildMotorway, placeRoundabout,
+buildRoundabout, placeTrafficLight (and its removal), addLine, extendLine,
+insertJunction, removeJunction, deleteLine. Two families of consumers read it:
 
 1. **Agents** — `a.pathV !== state.netVersion` invalidates cached `legs`, so
    paths recompute after any edit (with a 2s `retryT` delay).

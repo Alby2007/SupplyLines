@@ -13,7 +13,7 @@ game-over flag set here stops later phases that tick.
   bank extra).
 - **Level ratchet**: `served` counts arrivals; at `level·promoteEvery` the
   building levels (max 3), `demandT` clamps to ≤0 on promotion, and the rate
-  grows (`growth` 0.5/level — L3 demands 2× flow). A well-served workplace
+  grows (`growth` 0.3/level — L3 demands 1.6× flow). A well-served workplace
   literally becomes harder to keep fed — the Motorways difficulty ratchet.
 - `demandT ≥ limit` (90) → **"A workplace went understaffed"**.
 
@@ -52,7 +52,12 @@ Per home, `spawnClock` counts down (randomized 0..interval at placement):
 
 Upgrade list (`ui.js` `UPGRADES`): new transit line · add a train · +3 waiting
 capacity on all buildings · +2 road capacity · +12 road tiles · cargo wagon ·
-+1 market truck.
++1 market truck · motorway · roundabout · traffic light.
+
+The first motorway, roundabout, and traffic light are granted automatically
+once `week >= unlockWeek` (4 — i.e. when week 3 completes), via
+`*Granted`/`state.X = 1` flags in `economy.update`. After that they appear in
+the weekly picks (each `ok`-gated on its grant flag and capped at 9).
 
 ## Game-over flow
 

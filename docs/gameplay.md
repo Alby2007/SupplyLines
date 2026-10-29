@@ -15,10 +15,13 @@ meter fills completely.
 | `L` | Line tool |
 | `J` | Junction sub-tool (in the line group) |
 | `B` | Bulldozer sub-tool (in the road group) |
+| `M` | Motorway sub-tool (in the road group) |
+| `O` | Roundabout sub-tool (in the road group) |
+| `T` | Traffic light sub-tool (in the road group) |
 | `W` `A` `S` `D` / arrows | Pan the camera |
 | `Space` | Pause |
 | `1` / `2` | Game speed |
-| `Esc` | Cancel the current draft |
+| `Esc` | Cancel draft → then pause menu → closes it |
 
 Clicking the armed tool's hotbar button (or pressing its key again) disarms it.
 
@@ -70,7 +73,42 @@ Drag cells to erase. Deletes road edges under the drag and refunds every tile
 not still covered by another road. Also demolishes any **line** whose track
 crosses the dragged cells (trains despawn, passengers are dropped at the
 nearest stop to re-route) and removes any **junction** left without service.
-Orphaned road nodes are cleaned up; buildings stay.
+Orphaned road nodes are cleaned up; buildings stay. Touching any arc of a
+**roundabout** removes the whole ring (no tile refund — it cost an item), and
+bulldozing a lit junction refunds the light to your stock.
+
+### Motorway
+
+Arms only while you have a span in stock (first arrives at **week 4**, badge
+shows count, more come from weekly picks, cap 9). Drag free-form between two
+points on the existing network — the span is an **elevated express edge** that
+passes *over* the surface roads: no cells, no tile cost, no intersections.
+Both ends must anchor (building > node > edge). Vehicles on it cruise at
+**1.6×** car speed, and routing treats it as the fast option.
+
+### Roundabout
+
+Arms with stock (first at **week 4**, cap 9). Click to drop:
+
+- **On a junction** — replaces it; the incident roads become spokes feeding a
+  one-way circulating ring.
+- **On a road** — splits the edge and both halves feed the ring.
+- **On open ground** — stamps a standalone ring; roads drawn to it later join
+  normally.
+
+Inside the ring traffic circulates one-way and never yields — entering cars
+yield once at their entry node. It's the fix for a junction choked by
+yield-lock. Can't be placed on top of a building or another roundabout.
+
+### Traffic light
+
+Arms with stock (first at **week 4**, cap 9). Click a **real junction** (≥3
+arms, not a roundabout ring) to install — opposite arms pair into phases that
+rotate every 2.2s. Red arms hold at the line unconditionally; that guarantees
+a side road its turn on a saturated crossing that yield-to-occupied would
+starve forever. Click the lit junction again to remove and refund; bulldozing
+the junction refunds it too. The white ring at the crossing shows a green dot
+on each arm currently holding the green.
 
 ## Buildings
 
@@ -109,6 +147,18 @@ Every 60 seconds: +18 road tiles and a choice of **1 of 2** upgrades:
 - +12 road tiles
 - Cargo wagon (freight trains haul more crates)
 - +1 market delivery truck
+- Motorway / Roundabout / Traffic light (+1 stock, once granted)
+
+The first motorway, roundabout, and traffic light each arrive automatically at
+the start of **week 4**; after that they show up in the weekly picks (each
+capped at 9 in stock).
+
+## Pause menu
+
+`Esc` opens the pause card (after cancelling any in-progress draft): the sim
+freezes and a centered card offers **Resume** (or `Esc` again) and **Restart**
+(fresh city). While it's open every other hotkey is dead. `Space` and the HUD
+❚❚ button still pause without the menu.
 
 ## Automatic behaviour worth knowing
 
@@ -116,7 +166,13 @@ Every 60 seconds: +18 road tiles and a choice of **1 of 2** upgrades:
   car (cap: residents per home).
 - **Staff as drivers** — market workers double as milk-truck drivers; a
   short-staffed market still delivers, just with fewer trucks.
-- **Shifts** — workers stay ~25s at offices, ~75s at farms/markets, then
+- **Shifts** — workers stay ~25s at offices, ~120s at farms/markets, then
   commute home. A home's resident slot stays occupied until they're back.
 - **Workers prefer understaffed farms/markets** over offices — they'll walk
-  past an office to staff a starving food chain.
+  past an office to staff a starving food chain. Markets keep attracting
+  workers until every truck has a driver; farms stop attracting once staffed.
+- **Crates pick the neediest market** — a market whose assigned homes are
+  going hungry gets produce first (up to a truckload of buffer), then markets
+  on the farm's freight line, then any market. If the farm's outbound queue
+  backs up (~4 waiting crates), crates spill onto the road instead of waiting
+  for the train.

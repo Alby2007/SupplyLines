@@ -23,7 +23,11 @@ Edges (per mode filter `opts.modes`):
   to board, so adding trains genuinely improves routing.
 - **road** — each `roadEdge`, both directions. Cost =
   `len / max(10, carSpeed·congestFactor(edge))` — live congestion makes busy
-  roads slower *in pathfinding*, not just in animation.
+  roads slower *in pathfinding*, not just in animation. **Motorway** edges
+  multiply the cruise speed by `motorways.speedFactor` (1.6×) in the same
+  cost term, so routing prefers the express option. **`oneway`** edges
+  (roundabout ring arcs) only route in their built direction — the reverse
+  adjacency entry is skipped.
 
 ## Pathfinding (`findPath`)
 

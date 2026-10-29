@@ -1,6 +1,6 @@
 # Testing
 
-88 tests across 10 files, all headless — the sim layer is DOM-free so Node's
+110 tests across 13 files, all headless — the sim layer is DOM-free so Node's
 built-in runner executes it directly.
 
 ```sh
@@ -21,6 +21,9 @@ node --test tests/roads.test.js   # one file
 | `agents`→`colors.test.js` | Colour locks, unlock progression, colour-aware food |
 | `food.test.js` | Farm→market→home chain, staffing, milk trucks, commutes |
 | `freight.test.js` | Freight lines, crate routing, wagons |
+| `motorway.test.js` | Anchoring rules, speed factor, placement rejection |
+| `roundabout.test.js` | Ring stamping, junction/road replacement, atomic demolish |
+| `trafficlight.test.js` | Phase grouping, red/green behaviour, refunds, grants |
 | `sim.test.js` | Integration/fuzz: connectivity, liveness, traffic deadlocks |
 
 ## Conventions
@@ -78,3 +81,36 @@ function b(state, id, type, x, y) {           // minimal building stub
   add `Math.random()` reliance without a seeded helper.
 - The suite is fast (~1s); a slow test is usually a `runTicks` count that's
   too high for the assertion — most arrivals need <10 sim-seconds.
+
+## The autoplayer (`autoplay.mjs`)
+
+A headless bot that plays the **real** game — it imports the same sim modules
+and replicates `main.js`'s tick order, with `Math.random` replaced by a seeded
+RNG so runs are reproducible:
+
+```sh
+node autoplay.mjs --seed=1            # one run: postmortem + weekly timeline
+node autoplay.mjs --runs=20           # N seeds: aggregate table
+node autoplay.mjs --seed=1 --verbose  # every bot decision logged
+node autoplay.mjs --seed=1 --tune=demand.growth=0.35   # config override experiments
+```
+
+Policy: Dijkstra road paths weighted to reuse existing roads, a minimal food
+backbone (1 market per colour + ~1 farm per 12 homes), freight rail through
+all backbone markets, urgent lifeline corridors for hot workplaces,
+junction-spliced lines to trigger `awardConnectionTrains`, motorway spans and
+shortcut roads on the hottest work, roundabout/light placement under pressure,
+tile reserves for new colours, and backlog-aware upgrade picks.
+
+Each run prints weeks survived, death reason, warning-window length,
+connectivity, tiles left, and a verdict class
+(`DEMAND-PRESSURE`/`SYSTEMIC`/`RESOURCE-STARVED`/`CONNECTIVITY`/`UNFAIR`) —
+the point is distinguishing genuine demand-vs-supply ceilings from
+connectivity bugs the game caused. Current distribution: median 5 weeks, max
+6, with all deaths arriving at promoted-work understaffing or saturated
+milk-truck routes.
+
+Debug env vars (used when bisecting sim bugs): `BOTNORD`/`BOTNOLN`/`BOTNOSP`/
+`BOTNOSPAWN`/`BOTNOECON`/`BOTNOFOOD`/`BOTNOAGENTS`/`BOTNOVEH`/`BOTNODESIDE`
+disable individual subsystems; `BOTTRACE` logs road-build internals,
+`BOTPHASE` prints per-tick phase labels, `BOTPROFILE` dumps heap/size stats.
