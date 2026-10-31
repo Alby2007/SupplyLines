@@ -1,2 +1,6 @@
 .DS_Store
 node_modules/
+rl/.venv/
+rl/runs/
+rl/__pycache__/
+rl/*.log

@@ -32,6 +32,7 @@ import {
   cellOf, cellCenter, cellKey, cellsBetween, buildingCells,
 } from './src/grid.js';
 import { findPath, roadDistancesFrom } from './src/routing.js';
+import { pathToFileURL } from 'node:url';
 
 // ---- args ---------------------------------------------------------------
 const arg = (k, d) => {
@@ -92,9 +93,10 @@ function tick(state, dt) {
 
 // ---- grid / roads ---------------------------------------------------------
 
-const CS = CONFIG.grid.cell;
-const COLS = Math.floor(CONFIG.map.width / CS);
-const ROWS = Math.floor(CONFIG.map.height / CS);
+// read at call time — applyLevelOverrides changes CONFIG.map per level, so a
+// fixed const baked at module load would be wrong when imported as a library
+const gridCols = () => Math.floor(CONFIG.map.width / CONFIG.grid.cell);
+const gridRows = () => Math.floor(CONFIG.map.height / CONFIG.grid.cell);
 
 const served = (b) => b.roadNodeId != null;
 
@@ -182,7 +184,7 @@ function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null) {
       for (let dy = -1; dy <= 1; dy++) {
         if (!dx && !dy) continue;
         const nx = cur.cx + dx, ny = cur.cy + dy;
-        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+        if (nx < 0 || ny < 0 || nx >= gridCols() || ny >= gridRows()) continue;
         const nk = cellKey({ cx: nx, cy: ny });
         if (blocked.has(nk)) continue;
         const step = Math.hypot(dx, dy) * (roadIdx.has(nk) ? 0.2 : 1);
@@ -880,7 +882,18 @@ function run(seed, verbose) {
   return { state, pm, events };
 }
 
-if (RUNS > 0) {
+// exported for rl/env_worker.mjs (and anything else driving the sim
+// programmatically) — the block below only runs when invoked directly
+export {
+  srand, tick, gridCols, gridRows, heap,
+  served, blockedCells, mainComponentCells, pathToRoad, ettl, tryConnect,
+  junctionJoin, insertStop, newLine, onLine, avgDist, backboneWanted,
+  reachable, tryLines, pickUpgrade, junctionPressure, tryShortcut,
+  trySpecials, decide, postmortem, run,
+};
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain && RUNS > 0) {
   const rows = [];
   for (let s = SEED; s < SEED + RUNS; s++) rows.push(run(s, false).pm);
   console.log('seed | weeks | died by                        | conn | warn s | tiles | verdict');
@@ -896,7 +909,7 @@ if (RUNS > 0) {
   console.log('\ndeath causes:', causes);
   const ws = rows.map((r) => r.weeks).sort((a, b) => a - b);
   console.log('weeks survived: min', ws[0], 'median', ws[Math.floor(ws.length / 2)], 'max', ws[ws.length - 1]);
-} else {
+} else if (isMain) {
   const { pm, events } = run(SEED, VERBOSE);
   console.log('\n=== POSTMORTEM ===');
   console.log(JSON.stringify(pm, null, 2));
