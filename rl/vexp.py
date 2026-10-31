@@ -50,8 +50,8 @@ class EnvWorker:
         self.proc.stdin.write(json.dumps(msg) + '\n')
         self.proc.stdin.flush()
 
-    def reset(self, seed):
-        self._send({'cmd': 'reset', 'seed': seed})
+    def reset(self, seed, warm=0):
+        self._send({'cmd': 'reset', 'seed': seed, 'warm': warm})
         return self._read()
 
     def step(self, a):
@@ -69,12 +69,14 @@ class EnvWorker:
 class VecEnv:
     """N workers → batched obs/feats/mask numpy arrays. Auto-resets done envs."""
 
-    def __init__(self, n, level=1, base_seed=0):
+    def __init__(self, n, level=1, base_seed=0, warm=0):
         self.workers = [EnvWorker(level) for _ in range(n)]
         self.n = n
         self.ch, self.rows, self.cols = self.workers[0].ch, self.workers[0].rows, self.workers[0].cols
         self.gd, self.afd = self.workers[0].gd, self.workers[0].afd
         self._next_seed = base_seed
+        # max seconds of bot pre-play per episode — train.py anneals it down
+        self.warm = warm
 
     def _seeds(self, n):
         s = list(range(self._next_seed, self._next_seed + n))
@@ -96,7 +98,7 @@ class VecEnv:
         return {'grid': grids, 'glob': globs, 'feats': feats, 'mask': mask}
 
     def reset(self):
-        msgs = [w.reset(s) for w, s in zip(self.workers, self._seeds(self.n))]
+        msgs = [w.reset(s, self.warm) for w, s in zip(self.workers, self._seeds(self.n))]
         return self._pack(msgs)
 
     def step(self, actions):
@@ -110,7 +112,7 @@ class VecEnv:
             if m['done']:
                 infos[i]['episode'] = dict(m['info'])
                 infos[i]['truncated'] = not m['info'].get('reason')
-                rm = w.reset(int(self._seeds(1)[0]))
+                rm = w.reset(int(self._seeds(1)[0]), self.warm)
                 for k in obs:
                     obs[k][i] = self._pack([rm])[k][0]
         return obs, rews, dones, infos

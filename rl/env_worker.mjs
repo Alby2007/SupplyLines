@@ -1,6 +1,6 @@
 // Headless RL env worker — JSON-lines over stdio.
 //   node rl/env_worker.mjs --level=1
-// in : {"cmd":"reset","seed":1}
+// in : {"cmd":"reset","seed":1,"warm":120}  // warm = max seconds of bot pre-play
 //      {"cmd":"step","a":3}
 //      {"cmd":"close"}
 // out: {"obs":{"grid":<b64 f32>,"glob":[..]},"feats":[[..]..],"desc":[..],
@@ -14,7 +14,7 @@
 import { CONFIG, applyLevelOverrides } from '../src/config.js';
 import { createState, applyLevelFeatures } from '../src/state.js';
 import { UPGRADES } from '../src/ui.js';
-import { buildRoad, roadCellCost, roadCellIndex } from '../src/roads.js';
+import { buildRoad, roadCellCost, roadCellIndex, bridgeCost } from '../src/roads.js';
 import { placeRoundabout } from '../src/roundabouts.js';
 import { placeTrafficLight } from '../src/lights.js';
 import { buildMotorway } from '../src/motorways.js';
@@ -24,6 +24,7 @@ import * as readline from 'node:readline';
 import {
   srand, tick, served, blockedCells, mainComponentCells, pathToRoad,
   onLine, reachable, junctionPressure, newLine,
+  decide, pickUpgrade,
 } from '../autoplay.mjs';
 
 const arg = (k, d) => {
@@ -62,6 +63,7 @@ function feat(o = {}) {
   f[18] = Math.min(1, (o.stops ?? 0) / 8);
   f[19] = o.freight ? 1 : 0;
   f[20] = o.rescue ? 1 : 0;
+  f[21] = Math.min(1, o.bridgeFrac ?? 0); // fraction of a ~12-bridge crossing
   if (o.upgradeIdx != null) f[22 + o.upgradeIdx] = 1;
   return f;
 }
@@ -197,8 +199,11 @@ function enumerate(state) {
     if (!cells || cells.length < 2) continue;
     const cost = roadCellCost(state, cells);
     if (cost > state.roadTiles) continue;
+    const wet = bridgeCost(state, cells);
+    if (wet > (state.bridges ?? 0)) continue; // crossing the policy can't pay for
     push(
       { type: 'connect', color: b.color, costFrac: cost / Math.max(1, state.roadTiles),
+        bridgeFrac: wet / 12,
         meter: meterOf(b), wait: b.waiting.length / b.capacity, dist: cells.length * CONFIG.grid.cell },
       () => { if (buildRoad(state, cells).length) { state.roadTiles -= cost; return 0.15; } return 0; },
       `connect ${b.type}#${b.id}${b.active ? '' : ' (pending)'}`);
@@ -233,6 +238,7 @@ function enumerate(state) {
       const cells = planPairCells(state, c.h, c.w, blocked);
       const cost = roadCellCost(state, cells);
       if (cost > state.roadTiles - 8) continue;
+      if (bridgeCost(state, cells) > 0) continue; // same policy as tryShortcut
       push(
         { type: 'roadlink', color: c.w.color, costFrac: cost / Math.max(1, state.roadTiles),
           meter: meterOf(c.w), dist: cells.length * CONFIG.grid.cell },
@@ -365,13 +371,27 @@ function excessPressure(s) {
   return Math.max(0, m - 0.5);
 }
 
-function doReset(seed) {
+function doReset(seed, warm = 0) {
   Math.random = srand(seed);
   state = createState();
   state.level = LEVEL;
   applyLevelFeatures(state);
   steps = 0;
   for (let i = 0; i < 30; i++) tick(state, STEP); // let the seed cluster open
+  // reverse-curriculum warm start: the heuristic bot pre-plays a random
+  // prefix so episodes reach the states runs actually die in — agent and
+  // critic get gradient on week-5+ pressure from iteration 1. A quarter of
+  // resets stay cold so opening play doesn't atrophy.
+  const warmK = Math.random() < 0.25 ? 0 : Math.random() * warm;
+  let t = 0, dt = 0;
+  while (t < warmK && !state.gameOver) {
+    tick(state, STEP);
+    t += STEP;
+    dt -= STEP;
+    if (state.upgradePending) pickUpgrade(state, noopLog);
+    if (dt <= 0) { dt = 0.4; decide(state, noopLog); }
+  }
+  if (state.gameOver) return doReset(seed, 0); // bot died in warmup — cold retry
   prevExcess = excessPressure(state);
   return respond(0, false);
 }
@@ -434,7 +454,7 @@ rl.on('line', (line) => {
   try {
     if (msg.cmd === 'reset') {
       pending = null;
-      const r = doReset(msg.seed ?? 1);
+      const r = doReset(msg.seed ?? 1, msg.warm ?? 0);
       pending = r._acts;
       process.stdout.write(JSON.stringify(serialize(r)) + '\n');
     } else if (msg.cmd === 'step') {

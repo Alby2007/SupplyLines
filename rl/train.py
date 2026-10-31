@@ -32,6 +32,9 @@ def parse():
     p.add_argument('--eps', type=float, default=0.0, help='epsilon-greedy explore rate at iter 1')
     p.add_argument('--epsend', type=float, default=0.02, help='epsilon floor')
     p.add_argument('--epsdecay', type=float, default=0.995, help='per-iter decay')
+    p.add_argument('--warmstart', type=float, default=0,
+                   help='max seconds of bot pre-play per episode at iter 1')
+    p.add_argument('--warmdecay', type=float, default=1.0, help='per-iter decay on warmstart')
     p.add_argument('--vf', type=float, default=0.5)
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--tag', type=str, default='run')
@@ -47,7 +50,7 @@ def main():
     run_dir = os.path.join(os.path.dirname(__file__), 'runs', args.tag)
     os.makedirs(run_dir, exist_ok=True)
 
-    env = VecEnv(args.envs, level=args.level, base_seed=args.seed)
+    env = VecEnv(args.envs, level=args.level, base_seed=args.seed, warm=args.warmstart)
     net = ActorCritic(ch=env.ch, gd=env.gd, afd=env.afd).to(dev)
     if args.ckpt:
         net.load_state_dict(torch.load(args.ckpt, map_location=dev))
@@ -77,6 +80,8 @@ def main():
     for it in range(1, args.iters + 1):
         net.eval()
         cur_eps = max(args.epsend, args.eps * (args.epsdecay ** (it - 1)))
+        # warm-start anneal: deep bot prefixes early, agent-owned episodes late
+        env.warm = args.warmstart * (args.warmdecay ** (it - 1))
         for t in range(T):
             g = torch.as_tensor(obs['grid'], device=dev)
             gl = torch.as_tensor(obs['glob'], device=dev)
@@ -95,11 +100,9 @@ def main():
                 if forced.any():
                     with torch.no_grad():
                         logp = dist.log_prob(torch.as_tensor(na, device=dev))
-            obs, rews, dones, infos = env.step(na)
-            for i, inf in enumerate(infos):
-                if 'episode' in inf:
-                    inf['episode']['iter'] = it
-                    ep_stats.append(inf['episode'])
+            # store the state the action was taken FROM before stepping —
+            # env.step's return is s_{t+1}, and pairing it with a_t teaches
+            # the policy to act on observations it never saw
             b_grid[t] = obs['grid'].astype(np.float16)
             b_glob[t] = obs['glob']
             b_feats[t] = obs['feats'].astype(np.float16)
@@ -107,6 +110,11 @@ def main():
             b_act[t] = na
             b_logp[t] = logp.cpu().numpy()
             b_val[t] = v.cpu().numpy()
+            obs, rews, dones, infos = env.step(na)
+            for i, inf in enumerate(infos):
+                if 'episode' in inf:
+                    inf['episode']['iter'] = it
+                    ep_stats.append(inf['episode'])
             b_rew[t] = rews
             b_done[t] = dones
         step_total += T * N
@@ -174,7 +182,7 @@ def main():
             wks = [e['week'] for e in recent]
             dr = [e['delivered'] for e in recent]
             sps = int(step_total / (time.time() - t_start))
-            print(f'it {it:4d} | sps {sps:5d} | eps {len(ep_stats):4d} | '
+            print(f'it {it:4d} | sps {sps:5d} | eps {len(ep_stats):4d} | warm {env.warm:5.0f}s | '
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
                   f'del {np.mean(dr) if dr else 0:.0f} | '
                   f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f}', flush=True)
