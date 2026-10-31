@@ -54,12 +54,12 @@ Resolves by kind + building type:
 | crate | market | `b.stock++`, `freightDelivered++`, agent deleted |
 | person | own home | deleted — round trip complete, resident slot frees |
 | person | work | `demandT -= relief` (floored at `-grace`); `served++` → level promotion at `lvl*promoteEvery` (max 3, promotion clears demand); agent parked `workingAt`, `shiftT = work.shiftLen` |
-| person | farm/market | if `workers.length < workersNeeded*2`: push shift timer + park the agent identically to offices — staff commute home after their shift |
+| person | farm/market | if `workers.length < workersNeeded*2`: push shift timer + park the agent identically to offices — staff commute home after their `food.shiftLen` shift |
 | anything | else | deleted |
 
 The staff rule is important: **agents are not consumed on arrival at
 farms/markets** — they hold the resident slot at home until they physically
-return, so a 2-resident home supports at most 2 concurrent workers incl.
+return, so a 3-resident home supports at most 3 concurrent workers incl.
 travel. Offices behave identically, keeping the two systems consistent.
 
 ## Where people want to go (`personDestFor`)
@@ -68,11 +68,17 @@ Matchers tried in order:
 
 1. `understaffedFor(color)` — active farms (any colour — they're neutral)
    below `workersNeeded` (2 — exactly what production requires, no spare),
-   or same-colour markets below `min(trucks, workersNeeded*2)` — market staff
+   or same-colour markets below `min(trucks, workersNeeded+1)` — market staff
    are truck drivers, so staffing keeps attracting until every truck can
-   roll (which is what makes a "+1 market truck" upgrade actually work).
-   Workers prefer the food chain over offices at any distance.
-2. `officeFor(color)` — active same-colour workplaces.
+   roll plus one rotating spare (which is what makes a "+1 market truck"
+   upgrade actually work). Workers prefer the food chain over offices at any
+   distance.
+2. `hotOfficeFor(color)` — same-colour workplaces whose `demandT` is past
+   40% of `demand.limit`. Triage: commuters divert to a burning office
+   instead of piling into the nearest healthy one — without this tier a
+   well-served (higher-level) work can starve with zero arrivals while its
+   colour's whole pool is parked elsewhere.
+3. `officeFor(color)` — active same-colour workplaces (nearest path wins).
 
 Falls through to `null` legs → waits, retries every 2s.
 

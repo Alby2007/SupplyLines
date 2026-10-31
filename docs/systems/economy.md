@@ -9,11 +9,11 @@ game-over flag set here stops later phases that tick.
 `demandT` fills at `rate · (1 + (level-1)·growth)` per second:
 
 - Starts at `-grace` (−15s) — new workplaces get slack.
-- Each worker arrival clears `relief` (18s), floored at `-grace` (can't
+- Each worker arrival clears `relief` (24s), floored at `-grace` (can't
   bank extra).
 - **Level ratchet**: `served` counts arrivals; at `level·promoteEvery` the
   building levels (max 3), `demandT` clamps to ≤0 on promotion, and the rate
-  grows (`growth` 0.3/level — L3 demands 1.6× flow). A well-served workplace
+  grows (`growth` 0.15/level — L3 demands 1.3× flow). A well-served workplace
   literally becomes harder to keep fed — the Motorways difficulty ratchet.
 - `demandT ≥ limit` (90) → **"A workplace went understaffed"**.
 
@@ -21,7 +21,7 @@ game-over flag set here stops later phases that tick.
 
 - Only ticks once a farm exists (`foodEra` — any active farm anywhere).
 - `hungerT += dt`; milk-truck delivery resets to 0. Starts at `-pantryStart`.
-- `hungerT ≥ hungerLimit` (90) → **"A home starved"**.
+- `hungerT ≥ hungerLimit` (120) → **"A home starved"**.
 
 ## Overflow
 
@@ -35,7 +35,7 @@ Every building (junctions included) tracks `waiting.length ≥ capacity`:
 
 Per home, `spawnClock` counts down (randomized 0..interval at placement):
 
-- On fire: retry in 1s. If `out < homes.residents` (2), spawn a person and set
+- On fire: retry in 1s. If `out < homes.residents` (3), spawn a person and set
   `spawnClock = interval · (1 ± jitter)`. `out` comes from `presenceCounts` —
   people anywhere other than home (waiting, riding, or on shift).
 - The residents cap is the real throttle on commuter supply — a home with

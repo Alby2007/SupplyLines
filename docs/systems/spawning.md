@@ -67,7 +67,7 @@ that can function:
 `checkColorUnlocks` runs each update:
 
 - Counts live `person` agents (waiting + riding) per colour.
-- If the **newest** unlocked colour reaches `popToUnlock` (12) live people,
+- If the **newest** unlocked colour reaches `popToUnlock` (16) live people,
   the next palette index unlocks — permanently (ratchet, never re-locks).
 - The new colour gets seeded with a guaranteed pair: `{home, work}` pushed to
   `state.colorSeedQueue`, plus `{market}` once the food era has started.
@@ -84,6 +84,6 @@ left with no homes at all, which cascades into unservable works (see
 ## Building field defaults (from `placeBuilding`)
 
 `waiting:[]`, `capacity:6`, `workers:[]` (shift timers), `stock:0`,
-`hungerT:-pantryStart` (30s buffer), `demandT:-grace` (works, 15s slack),
+`hungerT:-pantryStart` (40s buffer), `demandT:-grace` (works, 15s slack),
 `level:1`, `served:0`, `trucks:marketTrucksStart` (markets), `spawnClock`
 randomized in `[0, commuters.interval)` so homes don't pulse in sync.

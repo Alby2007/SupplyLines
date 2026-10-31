@@ -15,16 +15,22 @@ const understaffedFor = (color) => (b) => {
   if (!b.active) return false;
   // farm staff only produce — it needs exactly the requirement on site
   if (b.type === 'farm') return b.workers.length < CONFIG.food.workersNeeded;
-  // market staff are truck drivers — it keeps attracting until every truck
-  // has a driver, otherwise a "+1 truck" upgrade can never take effect
+  // market staff are truck drivers — one driver per truck keeps the whole
+  // fleet rolling, so it attracts past the farm baseline up to truck count
   if (b.type === 'market' && b.color === color) {
-    return b.workers.length < Math.min(b.trucks, CONFIG.food.workersNeeded * 2);
+    return b.workers.length < Math.min(b.trucks, CONFIG.food.workersNeeded + 1);
   }
   return false;
 };
+// triage tier: a same-colour workplace with its demand meter running hot
+// beats the plain nearest-office rule — without it workers keep choosing the
+// closest job while a burning one starves two streets over
+const hotOfficeFor = (color) => (b) =>
+  b.active && b.type === 'work' && b.color === color &&
+  b.demandT > CONFIG.demand.limit * 0.4;
 const officeFor = (color) => (b) =>
   b.active && b.type === 'work' && b.color === color;
-export const personDestFor = (color) => [understaffedFor(color), officeFor(color)];
+export const personDestFor = (color) => [understaffedFor(color), hotOfficeFor(color), officeFor(color)];
 
 export const marketMatch = (b) => b.type === 'market' && b.active;
 

@@ -20,7 +20,7 @@ import * as food from './src/food.js';
 import * as agents from './src/agents.js';
 import * as vehicles from './src/vehicles.js';
 import { UPGRADES } from './src/ui.js';
-import { buildRoad, roadCellCost, roadCellIndex } from './src/roads.js';
+import { buildRoad, roadCellCost, roadCellIndex, bridgeCost } from './src/roads.js';
 import { placeRoundabout } from './src/roundabouts.js';
 import { placeTrafficLight } from './src/lights.js';
 import { buildMotorway } from './src/motorways.js';
@@ -29,7 +29,7 @@ import {
 } from './src/networks.js';
 import { addTrain, awardConnectionTrains } from './src/vehicles.js';
 import {
-  cellOf, cellCenter, cellKey, cellsBetween, buildingCells,
+  cellOf, cellCenter, cellKey, cellsBetween, buildingCells, nearestOnPolyline,
 } from './src/grid.js';
 import { findPath, roadDistancesFrom } from './src/routing.js';
 import { pathToFileURL } from 'node:url';
@@ -100,20 +100,19 @@ const gridRows = () => Math.floor(CONFIG.map.height / CONFIG.grid.cell);
 
 const served = (b) => b.roadNodeId != null;
 
-// cells a road must not cross — junctions and water reject the whole draw
+// cells a road must not cross — junction cells reject the whole draw. Water
+// is NOT blocked: pathToRoad treats it as a bridge spend, not a wall
 function blockedCells(state) {
-  const s = new Set(state.water ?? []);
+  const s = new Set();
   for (const b of state.buildings.values()) {
     if (b.type === 'junction') for (const c of buildingCells(b)) s.add(cellKey(c));
   }
   return s;
 }
 
-// cells of the largest building-anchored road component. Connecting anywhere
-// else just grows an island detached from the city — roadDistancesFrom can't
-// cross components, so an islanded home reads "connected" but starves with
-// no market assignment. Null when no component has buildings yet.
-function mainComponentCells(state, roadIdx) {
+// edge → component map plus the component id holding the most building
+// anchors — the "main network" every draw should land on
+function edgeComponents(state) {
   const comp = new Map(); // edgeId → component id
   let ncomp = 0;
   for (const e of state.roadEdges.values()) {
@@ -138,12 +137,65 @@ function mainComponentCells(state, roadIdx) {
   }
   let best = null, n = 0;
   for (const [cid, s] of score) if (s > n) { n = s; best = cid; }
-  if (best == null) return null;
+  return { comp, best };
+}
+
+function componentCells(roadIdx, comp, best) {
   const goal = new Map();
   for (const [k, refs] of roadIdx) {
     if (refs.some((r) => comp.get(r.edgeId) === best)) goal.set(k, refs);
   }
   return goal;
+}
+
+// cells of the largest building-anchored road component. Connecting anywhere
+// else just grows an island detached from the city — roadDistancesFrom can't
+// cross components, so an islanded home reads "connected" but starves with
+// no market assignment. Null when no component has buildings yet.
+function mainComponentCells(state, roadIdx) {
+  const { comp, best } = edgeComponents(state);
+  if (best == null) return null;
+  return componentCells(roadIdx, comp, best);
+}
+
+// node ids on the main component — served() only checks roadNodeId, so a
+// building anchored to a stub still reads "connected" when the stub is an
+// island the planner mistook for the network
+function mainComponentNodes(state, comp, best) {
+  if (best == null) return null;
+  const out = new Set();
+  for (const n of state.roadNodes.values()) {
+    if (n.edges.length && comp.get(n.edges[0]) === best) out.add(n.id);
+  }
+  return out;
+}
+
+// endpoint anchors are geometric (26px) while the planner thinks in cells —
+// a goal cell whose centre sits >snap from every node/edge lands the draw
+// beside the network instead of on it, orphaning the building on a stub that
+// reads "connected". Keep only goal cells a draw can actually merge into.
+function mergeableGoalCells(state, goal, mainNodes) {
+  if (!goal) return goal;
+  const nodeCells = new Map();
+  for (const n of state.roadNodes.values()) {
+    if (!mainNodes.has(n.id)) continue;
+    const k = cellKey(cellOf(n));
+    (nodeCells.get(k) ?? nodeCells.set(k, []).get(k)).push(n);
+  }
+  const out = new Map();
+  for (const [k, refs] of goal) {
+    const [cx, cy] = k.split(',').map(Number);
+    const c = cellCenter(cx, cy);
+    let ok = (nodeCells.get(k) ?? []).some(
+      (n) => Math.hypot(n.x - c.x, n.y - c.y) <= CONFIG.roads.snap);
+    for (const r of refs) {
+      if (ok) break;
+      const e = state.roadEdges.get(r.edgeId);
+      if (e && !e.motorway && nearestOnPolyline(e.pts, c).d <= CONFIG.roads.snap) ok = true;
+    }
+    if (ok) out.set(k, refs);
+  }
+  return out;
 }
 
 // tiny binary heap keyed by .d
@@ -164,47 +216,61 @@ function heap() {
 // dijkstra over grid cells: reusing existing road costs ~0 — it spends tiles
 // the way a good player would, consolidating onto established streets.
 // goalIdx narrows which road cells count as landings (default: any).
+// Water cells are traversable at a steep step cost — each uncovered one is a
+// bridge spend, so crossings win only when the land route is worse (river
+// spans the whole map height: crossing IS the route). If the cheapest plan
+// needs more bridges than we hold, retry land-only before giving up.
 // Returns a cell path (building → road), or null.
 function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null) {
   const goal = goalIdx ?? roadIdx;
-  const dist = new Map();
-  const prev = new Map();
-  const pq = heap();
-  for (const c of fromCells) {
-    const k = cellKey(c);
-    dist.set(k, 0);
-    pq.push({ k, cx: c.cx, cy: c.cy, d: 0 });
-  }
-  let found = null;
-  while (pq.size) {
-    const cur = pq.pop();
-    if (cur.d > (dist.get(cur.k) ?? Infinity)) continue;
-    if (goal.has(cur.k)) { found = cur; break; }
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        if (!dx && !dy) continue;
-        const nx = cur.cx + dx, ny = cur.cy + dy;
-        if (nx < 0 || ny < 0 || nx >= gridCols() || ny >= gridRows()) continue;
-        const nk = cellKey({ cx: nx, cy: ny });
-        if (blocked.has(nk)) continue;
-        const step = Math.hypot(dx, dy) * (roadIdx.has(nk) ? 0.2 : 1);
-        const nd = cur.d + step;
-        if (nd < (dist.get(nk) ?? Infinity)) {
-          dist.set(nk, nd);
-          prev.set(nk, cur.k);
-          pq.push({ k: nk, cx: nx, cy: ny, d: nd });
+  const water = state.water;
+  const run = (wetOk) => {
+    const dist = new Map();
+    const prev = new Map();
+    const pq = heap();
+    for (const c of fromCells) {
+      const k = cellKey(c);
+      dist.set(k, 0);
+      pq.push({ k, cx: c.cx, cy: c.cy, d: 0 });
+    }
+    let found = null;
+    while (pq.size) {
+      const cur = pq.pop();
+      if (cur.d > (dist.get(cur.k) ?? Infinity)) continue;
+      if (goal.has(cur.k)) { found = cur; break; }
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (!dx && !dy) continue;
+          const nx = cur.cx + dx, ny = cur.cy + dy;
+          if (nx < 0 || ny < 0 || nx >= gridCols() || ny >= gridRows()) continue;
+          const nk = cellKey({ cx: nx, cy: ny });
+          if (blocked.has(nk)) continue;
+          const wet = water?.has(nk) && !roadIdx.has(nk);
+          if (wet && !wetOk) continue;
+          const step = Math.hypot(dx, dy) * (roadIdx.has(nk) ? 0.2 : wet ? 4 : 1);
+          const nd = cur.d + step;
+          if (nd < (dist.get(nk) ?? Infinity)) {
+            dist.set(nk, nd);
+            prev.set(nk, cur.k);
+            pq.push({ k: nk, cx: nx, cy: ny, d: nd });
+          }
         }
       }
     }
-  }
-  if (!found) return null;
-  const cells = [];
-  let k = found.k;
-  while (k) {
-    const [cx, cy] = k.split(',').map(Number); // cellKey is "cx,cy"
-    cells.unshift({ cx, cy });
-    k = prev.get(k);
-  }
+    if (!found) return null;
+    const cells = [];
+    let k = found.k;
+    while (k) {
+      const [cx, cy] = k.split(',').map(Number); // cellKey is "cx,cy"
+      cells.unshift({ cx, cy });
+      k = prev.get(k);
+    }
+    return cells;
+  };
+  const cells = run((state.bridges ?? 0) > 0);
+  // bridge-winning but unaffordable — a dry route may still connect (or the
+  // goal genuinely lives across the river and this draw must wait)
+  if (cells && bridgeCost(state, cells) > (state.bridges ?? 0)) return run(false);
   return cells;
 }
 
@@ -234,17 +300,20 @@ function tryConnect(state, b, log) {
     }
     if (!other) return false;
     cells = cellsBetween(cellOf(b), cellOf(other));
-    // the straight draw may cross water — buildRoad rejects the whole path,
-    // so reroute around the blockage with the grid Dijkstra instead
+    // the straight draw may cross junctions (buildRoad rejects) or water
+    // (spends bridges — pick the cheap crossing with the grid Dijkstra)
     const blk = blockedCells(state);
-    if (cells.some((c) => blk.has(cellKey(c)))) {
+    if (cells.some((c) => blk.has(cellKey(c)) || state.water?.has(cellKey(c)))) {
       const goal = new Map(buildingCells(other).map((c) => [cellKey(c), []]));
       cells = pathToRoad(state, own, goal, blk) ?? cells;
     }
   } else {
     if (process.env.BOTTRACE) console.log(`pathToRoad start ${b.type}#${b.id}`);
-    // land on the main network, not just any road — island stubs don't count
-    const goal = mainComponentCells(state, roadIdx);
+    // land on the main network — and only on cells a draw can actually merge
+    // into, so the endpoint never stubs out a few px short of the edge
+    const { comp, best } = edgeComponents(state);
+    const goal = mergeableGoalCells(
+      state, componentCells(roadIdx, comp, best), mainComponentNodes(state, comp, best));
     cells = pathToRoad(state, own, roadIdx, blockedCells(state), goal);
     if (process.env.BOTTRACE) console.log(`pathToRoad done ${b.type}#${b.id} cells=${cells?.length}`);
   }
@@ -252,6 +321,11 @@ function tryConnect(state, b, log) {
   const cost = roadCellCost(state, cells);
   if (cost > state.roadTiles) {
     b._botWantedRoad = true; // postmortem: connection wanted but unaffordable
+    return false;
+  }
+  const wet = bridgeCost(state, cells);
+  if (wet > (state.bridges ?? 0)) {
+    b._botWantedBridge = true; // postmortem: river crossing out of stock
     return false;
   }
   if (process.env.BOTTRACE) {
@@ -280,7 +354,8 @@ function tryConnect(state, b, log) {
   if (!edges.length) return false;
   state.roadTiles -= cost;
   b._botRouted = true; // one draw per building — the network keeps it served
-  log(`road: ${b.type}#${b.id} (${edges.length} edges, -${cost} tiles → ${state.roadTiles})`);
+  log(`road: ${b.type}#${b.id} (${edges.length} edges, -${cost} tiles → ${state.roadTiles}` +
+    `${wet ? `, -${wet} bridges → ${state.bridges}` : ''})`);
   return true;
 }
 
@@ -519,6 +594,9 @@ function pickUpgrade(state, log) {
   const score = (u) => {
     const n = u.name;
     if (n.includes('road tiles')) return state.roadTiles < 18 ? 100 : 35;
+    // ~6–10 bridges per river crossing — below that the next cross-river
+    // spawn is a hard wall, which outranks even an empty tile bank
+    if (n.includes('Bridges')) return state.bridges < 6 ? 105 : (state.bridges < 14 ? 55 : 15);
     if (n.includes('transit line')) return state.lines.size >= state.maxLines ? 90 : 5;
     if (n.includes('market delivery truck')) return homesHungry ? 85 : 40;
     if (n.includes('Add a train')) {
@@ -574,6 +652,9 @@ function tryShortcut(state, log) {
   const cells = cellsBetween(cellOf(best.h), cellOf(best.w));
   const cost = roadCellCost(state, cells);
   if (cost > state.roadTiles - 8) return false;
+  // bridges are for reaching the unreachable — never burn the stock on an
+  // express duplicate of a route that already exists
+  if (bridgeCost(state, cells) > 0) return false;
   const edges = buildRoad(state, cells);
   if (!edges.length) return false;
   state.roadTiles -= cost;
@@ -653,6 +734,30 @@ function decide(state, log) {
   const bs = [...state.buildings.values()].filter((b) => b.type !== 'junction');
   bs.sort((a, b) => ettl(state, a, foodEra) - ettl(state, b, foodEra));
   if (!process.env.BOTNORD) {
+    // repair stubs: a draw that ended just outside the merge radius leaves a
+    // building "connected" to an island — it starves while reading served
+    const roadIdx = roadCellIndex(state);
+    if (roadIdx.size) {
+      const { comp, best } = edgeComponents(state);
+      const mainNodes = mainComponentNodes(state, comp, best);
+      const safeGoal = mainNodes &&
+        mergeableGoalCells(state, componentCells(roadIdx, comp, best), mainNodes);
+      if (safeGoal) {
+        const blocked = blockedCells(state);
+        for (const b of bs) {
+          if (!served(b) || mainNodes.has(b.roadNodeId)) continue;
+          const cells = pathToRoad(state, buildingCells(b), roadIdx, blocked, safeGoal);
+          if (!cells || cells.length < 2) continue;
+          const cost = roadCellCost(state, cells);
+          if (cost > state.roadTiles) continue;
+          if (bridgeCost(state, cells) > (state.bridges ?? 0)) continue;
+          if (buildRoad(state, cells).length) {
+            state.roadTiles -= cost;
+            log(`rejoin: ${b.type}#${b.id} — stub was an island`);
+          }
+        }
+      }
+    }
     // keep a bank for the next colour's market — a new colour's homes starve
     // on a fixed clock and its market must connect the moment it spawns
     const RESERVE = 14;
@@ -703,6 +808,7 @@ function postmortem(state, warn, arrivals) {
       hungerT: Math.round(victim.hungerT), demandT: Math.round(victim.demandT),
       overflowT: +victim.overflowT.toFixed(1),
       wantedRoad: !!victim._botWantedRoad,
+      wantedBridge: !!victim._botWantedBridge,
       warnSec: warn.get(victim.id) != null ? +(state.time - warn.get(victim.id)).toFixed(1) : null,
     };
     if (go.reason.includes('starved')) {
@@ -777,7 +883,9 @@ function postmortem(state, warn, arrivals) {
     verdicts.push(`UNFAIR: ${v.warnSec}s warning — under any human reaction window`);
   }
   if (!v.connected) {
-    verdicts.push(v.wantedRoad
+    verdicts.push(v.wantedBridge
+      ? 'RESOURCE-STARVED: river crossing wanted but bridge stock ran out — grant/pick pacing'
+      : v.wantedRoad
       ? 'RESOURCE-STARVED: connection was wanted but tiles ran out — tilesPerWeek vs spawn rate tuning'
       : 'FAIR (player error): building was connectable and never linked');
   } else if (go.reason.includes('starved')) {

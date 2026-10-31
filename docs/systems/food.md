@@ -6,13 +6,13 @@ the same commuters that run offices. It starts at `week >= foodStartWeek` (2).
 ## Staffing
 
 Farms and markets don't run themselves — they hold shift timers in
-`b.workers[]` (one entry per worker, `food.shiftLen` = 120s each, decayed in
+`b.workers[]` (one entry per worker, `food.shiftLen` = 180s each, decayed in
 `food.update`). The arriving worker's **agent is parked** at the building with
 `workingAt` set, and commutes home when the shift ends (see
 [agents](agents.md)) — the resident slot at home stays occupied the whole
 round trip.
 
-- **Farm** produces a crate every `produceInterval` (4s) while
+- **Farm** produces a crate every `produceInterval` (3s) while
   `workers.length >= workersNeeded` (2). All-or-nothing.
 - **Market** dispatches trucks gated per worker (see below) — degrades
   gracefully rather than all-or-nothing.
@@ -20,7 +20,7 @@ round trip.
   before the shift timers rotate out.
 - **Attraction** (in agents.js) matches function: farms pull workers only
   while below `workersNeeded`; markets pull while below
-  `min(trucks, workersNeeded*2)` — staff are truck drivers, so a market
+  `min(trucks, workersNeeded+1)` — staff are truck drivers, so a market
   staffs up to its truck count and a "+1 truck" upgrade actually lands.
 
 ## Crates
@@ -62,9 +62,9 @@ Every `dispatchInterval` (2s) per market:
   `activeTrucks < min(trucks, workers.length)` — each on-shift worker means
   one more truck on the road. A 1-worker market with 3 trucks still delivers,
   just one truck at a time. An unstaffed market stalls completely.
-- Targets = assigned homes with `hungerT > hungryAt` (20s), sorted hungriest
+- Targets = assigned homes with `hungerT > hungryAt` (10s), sorted hungriest
   first — deliveries triage the most desperate homes.
-- `load = min(stock, milkCap(4), targets.length)`; stock decrements on spawn.
+- `load = min(stock, milkCap(6), targets.length)`; stock decrements on spawn.
 
 ## Milk trucks (`spawnMilkTruck` → `milkArrive`)
 
@@ -80,9 +80,9 @@ Every `dispatchInterval` (2s) per market:
 ## Homes starving
 
 `economy.update` adds `dt` to `b.hungerT` every tick once the food era starts.
-`hungerT` starts at `-pantryStart` (−30s buffer for new homes). At
-`hungerLimit` (90): `gameOver = 'A home starved'`.
+`hungerT` starts at `-pantryStart` (−40s buffer for new homes). At
+`hungerLimit` (120): `gameOver = 'A home starved'`.
 
 The whole loop in one line: staff farm → crates stock markets → trucks reset
-`hungerT` before it hits 90 — starved homes are a connectivity failure, not a
-numbers failure.
+`hungerT` before it hits 120 — starved homes are usually a coverage failure
+(trucks can't cycle the hungry set fast enough), not a numbers failure.

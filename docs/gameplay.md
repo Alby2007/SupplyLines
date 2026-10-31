@@ -114,7 +114,7 @@ on each arm currently holding the green.
 
 | Shape | Type | Role |
 |---|---|---|
-| Circle | Home | Houses residents (≤2 out at once), needs workers back, gets hungry |
+| Circle | Home | Houses residents (≤3 out at once), needs workers back, gets hungry |
 | Square | Work | Employs people; 2×2-cell footprint; has a demand meter and levels |
 | Octagon | Farm | Neutral colour; produces crates when staffed |
 | Triangle | Market | Receives crates, dispatches milk trucks to same-colour homes |
@@ -204,7 +204,7 @@ leaving mid-game loses progress. `Esc`/Back returns to the pause card.
   car (cap: residents per home).
 - **Staff as drivers** — market workers double as milk-truck drivers; a
   short-staffed market still delivers, just with fewer trucks.
-- **Shifts** — workers stay ~25s at offices, ~120s at farms/markets, then
+- **Shifts** — workers stay ~18s at offices, ~180s at farms/markets, then
   commute home. A home's resident slot stays occupied until they're back.
 - **Workers prefer understaffed farms/markets** over offices — they'll walk
   past an office to staff a starving food chain. Markets keep attracting

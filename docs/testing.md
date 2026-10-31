@@ -95,20 +95,26 @@ node autoplay.mjs --seed=1 --verbose  # every bot decision logged
 node autoplay.mjs --seed=1 --tune=demand.growth=0.35   # config override experiments
 ```
 
-Policy: Dijkstra road paths weighted to reuse existing roads, a minimal food
+Policy: Dijkstra road paths weighted to reuse existing roads — water cells
+are traversable at a steep step cost, so crossings spend bridges only when
+the land route is worse, and unaffordable crossings fall back to a land-only
+search — a minimal food
 backbone (1 market per colour + ~1 farm per 12 homes), freight rail through
 all backbone markets, urgent lifeline corridors for hot workplaces,
 junction-spliced lines to trigger `awardConnectionTrains`, motorway spans and
-shortcut roads on the hottest work, roundabout/light placement under pressure,
-tile reserves for new colours, and backlog-aware upgrade picks.
+shortcut roads on the hottest work (never across water — bridges are reserved
+for first-connects), roundabout/light placement under pressure,
+tile reserves for new colours, and backlog-aware upgrade picks (Bridges
+picked aggressively once stock dips below a crossing's worth).
 
 Each run prints weeks survived, death reason, warning-window length,
 connectivity, tiles left, and a verdict class
 (`DEMAND-PRESSURE`/`SYSTEMIC`/`RESOURCE-STARVED`/`CONNECTIVITY`/`UNFAIR`) —
 the point is distinguishing genuine demand-vs-supply ceilings from
-connectivity bugs the game caused. Current distribution: median 5 weeks, max
-6, with all deaths arriving at promoted-work understaffing or saturated
-milk-truck routes.
+connectivity bugs the game caused. Current distribution (20-seed Map 1):
+median 8 weeks, max 12; Map 3 reaches median 9 now that the planner bridges
+the river — deaths are saturated milk-truck routes or promoted-work
+understaffing, not connectivity.
 
 Debug env vars (used when bisecting sim bugs): `BOTNORD`/`BOTNOLN`/`BOTNOSP`/
 `BOTNOSPAWN`/`BOTNOECON`/`BOTNOFOOD`/`BOTNOAGENTS`/`BOTNOVEH`/`BOTNODESIDE`

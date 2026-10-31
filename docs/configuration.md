@@ -74,9 +74,9 @@ motorways and transit lines can pass over.
 |---|---|---|
 | `commuters.interval` | 5 | Avg seconds between departures per home |
 | `commuters.jitter` | 0.6 | `1 ± jitter` multiplier on the interval |
-| `homes.residents` | 2 | People "out" per home cap **and** carpool cap |
-| `work.shiftLen` | 25 | Seconds an office worker stays before heading home |
-| `food.shiftLen` | 120 | Seconds a farm/market worker stays |
+| `homes.residents` | 3 | People "out" per home cap **and** carpool cap |
+| `work.shiftLen` | 18 | Seconds an office worker stays before heading home |
+| `food.shiftLen` | 180 | Seconds a farm/market worker stays |
 
 ## Trains (`networks.js`, `vehicles.js`)
 
@@ -92,7 +92,7 @@ motorways and transit lines can pass over.
 
 | Key | Default | Effect |
 |---|---|---|
-| `carSpeed` / `truckSpeed` | 90 / 70 | px/s for cars and cargo vehicles |
+| `carSpeed` / `truckSpeed` | 90 / 85 | px/s for cars and cargo vehicles |
 | `width` | 16 | Rendered road width px (two lanes) |
 | `laneOffset` | 4 | Keep-right offset px |
 | `congestAt` | 6 | Vehicles per edge before slowdown starts |
@@ -134,15 +134,15 @@ so the mechanic simply doesn't exist on maps without the section.
 
 | Key | Default | Effect |
 |---|---|---|
-| `produceInterval` | 4 | Seconds per crate at a staffed farm |
+| `produceInterval` | 3 | Seconds per crate at a staffed farm |
 | `workersNeeded` | 2 | Workers to fully staff a farm/market |
 | `stockpileCap` | 10 | Defined but currently unused (no stock ceiling enforced) |
-| `hungerLimit` | 90 | s a home can go unfed → starve game over |
-| `pantryStart` | 30 | Negative `hungerT` head start on new homes |
-| `hungryAt` | 20 | Dispatch ignores homes under this hunger; also the crate-routing threshold for "hungry market" |
+| `hungerLimit` | 120 | s a home can go unfed → starve game over |
+| `pantryStart` | 40 | Negative `hungerT` head start on new homes |
+| `hungryAt` | 10 | Dispatch ignores homes under this hunger; also the crate-routing threshold for "hungry market" |
 | `marketTrucksStart` | 3 | Milk trucks per market |
 | `marketServeCap` | 5 | Defined but currently unused (no per-truck serve cap enforced) |
-| `milkCap` | 4 | Deliveries per milk-truck run |
+| `milkCap` | 6 | Deliveries per milk-truck run |
 | `crateCap` | 4 | Crates per cargo wagon |
 | `dispatchInterval` | 2 | s between market dispatch checks |
 | `assignInterval` | 3 | s between home→market reassignment |
@@ -162,11 +162,11 @@ so the mechanic simply doesn't exist on maps without the section.
 | Key | Default | Effect |
 |---|---|---|
 | `demand.rate` | 1 | demandT per second unserved |
-| `demand.relief` | 18 | s of demand each worker arrival clears |
+| `demand.relief` | 24 | s of demand each worker arrival clears |
 | `demand.limit` | 90 | meter full → "understaffed" game over |
 | `demand.grace` | 15 | new workplaces start with this much slack |
-| `demand.growth` | 0.3 | extra rate per level (L3 = 1.6× rate) |
-| `demand.promoteEvery` | 14 | arrivals per level |
+| `demand.growth` | 0.15 | extra rate per level (L3 = 1.3× rate) |
+| `demand.promoteEvery` | 20 | arrivals per level |
 | `demand.maxLevel` | 3 | level cap |
 | `overflowLimit` | 25 | s at/over capacity → game over (decays at 1.5×) |
 
@@ -178,7 +178,7 @@ so the mechanic simply doesn't exist on maps without the section.
 | `win.stars` | `[5, 8, 11]` | Week-reached thresholds for 1/2/3 stars at game over (Map 3: `[4, 7, 10]`) |
 | `colors.palette` | 6 hex | Building/line colours |
 | `colors.startUnlocked` | 1 | Palette indexes available at start |
-| `colors.popToUnlock` | 12 | Live people of the newest colour to unlock the next |
+| `colors.popToUnlock` | 16 | Live people of the newest colour to unlock the next |
 | `costs.transferPenalty` | 6 | Added once per mode switch in pathfinding |
 | `costs.stopPenalty` | 0.6 | Per line-segment cost in pathfinding |
 | `costs.boardWait` | 3 | Minimum expected-wait term for boarding a line |

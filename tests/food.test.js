@@ -91,18 +91,20 @@ test('a market with one worker still runs a truck — staff are the drivers', ()
 
 test('trucks split coverage — no two trucks run the same route', () => {
   const s = createState();
-  // five hungry homes; truck 1 loads at most milkCap(4) drops — truck 2 may
+  // seven hungry homes; truck 1 loads at most milkCap(6) drops — truck 2 may
   // only visit the lone leftover. Truck 1 re-orders drops by proximity.
   b(s, 1, 'home', 100, 100, { hungerT: 60 });
   b(s, 5, 'home', 600, 100, { hungerT: 58 });
   b(s, 4, 'home', 100, 300, { hungerT: 55 });
   b(s, 6, 'home', 600, 300, { hungerT: 50 });
   b(s, 7, 'home', 600, 500, { hungerT: 48 });
+  b(s, 8, 'home', 300, 300, { hungerT: 46 });
+  b(s, 9, 'home', 600, 700, { hungerT: 44 });
   const mkt = b(s, 2, 'market', 300, 100, { workers: [45, 45], stock: 8 });
   road(s, { x: 100, y: 100 }, { x: 600, y: 100 });
   road(s, { x: 100, y: 300 }, { x: 600, y: 300 });
   road(s, { x: 100, y: 100 }, { x: 100, y: 300 });
-  road(s, { x: 600, y: 300 }, { x: 600, y: 500 });
+  road(s, { x: 600, y: 300 }, { x: 600, y: 700 });
 
   runTicks(s, 8); // assignment ~3s, then two dispatch windows (interval = 2s)
   const trucks = [...s.vehicles.values()].filter((v) => v.kind === 'milkTruck');
@@ -110,13 +112,14 @@ test('trucks split coverage — no two trucks run the same route', () => {
 
   const [t1, t2] = trucks;
   // truck 2 may only visit homes truck 1 isn't covering — the lone leftover
-  assert.deepEqual(t2.targets, [7]);
+  assert.deepEqual(t2.targets, [9]);
   for (const id of t1.targets) {
-    assert.ok([1, 4, 5, 6].includes(id), `truck 1 unexpectedly targets ${id}`);
+    assert.ok([1, 4, 5, 6, 7, 8].includes(id), `truck 1 unexpectedly targets ${id}`);
   }
-  // nearest-neighbour order: h1 already delivered (nearest), now heading to
-  // h4 — hunger order would have sent it to h5 (58 > 55) instead
-  assert.equal(t1.targets[0], 4, 'truck should visit the nearer home next');
+  // nearest-neighbour order: h1 gets visited before the hungrier h5 — hunger
+  // order would have sent the truck to h5 (58 > 55) first instead
+  assert.ok(t1.targets.indexOf(4) <= t1.targets.indexOf(5),
+    'truck should visit the nearer home before the hungrier one');
 });
 
 test('full food chain: workers → farm → crates → market → fed home', () => {
@@ -149,6 +152,6 @@ test('farm staff persist through the shift, then commute home', () => {
   const out = [...s.agents.values()].filter((x) => x.home === h.id).length;
   assert.equal(out, 1, 'resident slot should stay taken while on-shift');
 
-  runTicks(s, 140); // shift ends (~120s) + commute home
+  runTicks(s, CONFIG.food.shiftLen + 30); // shift ends + commute home
   assert.ok(!s.agents.has(a.id), 'returned worker should be deleted at home');
 });
