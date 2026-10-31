@@ -20,6 +20,8 @@ def parse():
     p = argparse.ArgumentParser()
     p.add_argument('--envs', type=int, default=8)
     p.add_argument('--level', type=int, default=1)
+    p.add_argument('--levels', type=str, default=None,
+                   help='comma list cycled across envs for mixed-map training, e.g. 1,1,2,3')
     p.add_argument('--iters', type=int, default=300)
     p.add_argument('--tsteps', type=int, default=2048, help='rollout steps per iter')
     p.add_argument('--gamma', type=float, default=0.997)
@@ -50,7 +52,8 @@ def main():
     run_dir = os.path.join(os.path.dirname(__file__), 'runs', args.tag)
     os.makedirs(run_dir, exist_ok=True)
 
-    env = VecEnv(args.envs, level=args.level, base_seed=args.seed, warm=args.warmstart)
+    levels = [int(x) for x in args.levels.split(',')] if args.levels else args.level
+    env = VecEnv(args.envs, level=levels, base_seed=args.seed, warm=args.warmstart)
     net = ActorCritic(ch=env.ch, gd=env.gd, afd=env.afd).to(dev)
     if args.ckpt:
         net.load_state_dict(torch.load(args.ckpt, map_location=dev))
@@ -181,13 +184,24 @@ def main():
             recent = ep_stats[-30:]
             wks = [e['week'] for e in recent]
             dr = [e['delivered'] for e in recent]
+            # action mix across recent episodes — a healthy policy diversifies
+            # into lines/specials as the city grows; ~all 'connect' is collapse
+            amix = {}
+            for e in recent:
+                for k, v in (e.get('acts') or {}).items():
+                    amix[k] = amix.get(k, 0) + v
+            atot = sum(amix.values()) or 1
+            astr = ' '.join(f'{k[:4]} {v/atot:.0%}' for k, v in
+                            sorted(amix.items(), key=lambda x: -x[1])[:5])
             sps = int(step_total / (time.time() - t_start))
             print(f'it {it:4d} | sps {sps:5d} | eps {len(ep_stats):4d} | warm {env.warm:5.0f}s | '
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
-                  f'del {np.mean(dr) if dr else 0:.0f} | '
+                  f'del {np.mean(dr) if dr else 0:.0f} | acts {astr} | '
                   f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f}', flush=True)
+            # write ALL finished episodes — truncating to `recent` would drop
+            # every episode beyond the last 30 in the window
             with open(os.path.join(run_dir, 'episodes.jsonl'), 'a') as fh:
-                for e in recent:
+                for e in ep_stats:
                     fh.write(json.dumps(e) + '\n')
             ep_stats.clear()
         if it % 20 == 0:

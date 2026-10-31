@@ -20,6 +20,7 @@ import { placeRoundabout } from '../src/roundabouts.js';
 import { placeTrafficLight } from '../src/lights.js';
 import { buildMotorway } from '../src/motorways.js';
 import { cellOf, cellKey, cellsBetween, buildingCells, cellsAlongPolyline } from '../src/grid.js';
+import { linePts, extendLine } from '../src/networks.js';
 import { roadDistancesFrom } from '../src/routing.js';
 import * as readline from 'node:readline';
 import {
@@ -41,7 +42,11 @@ const DECIDE_DT = 0.5;          // sim-seconds per decision
 const MAX_SECONDS = 15 * 60;    // episode cap (truncation, not death)
 const COLS = Math.floor(CONFIG.map.width / CONFIG.grid.cell);
 const ROWS = Math.floor(CONFIG.map.height / CONFIG.grid.cell);
-const CH = 18, GD = 25, AFD = 40, MAXA = 64;
+// obs padded to a fixed canvas so VecEnv can batch mixed levels — Map 1's
+// 40-wide grid lands in the left half and the level one-hot in globals tells
+// the policy which map it's on
+const OBSCOLS = Math.max(COLS, 80), OBSROWS = Math.max(ROWS, 32);
+const CH = 20, GD = 25, AFD = 40, MAXA = 64;
 
 // ---- action enumeration ---------------------------------------------------
 
@@ -107,13 +112,37 @@ function planPairCells(state, fromB, toB, blocked) {
 }
 
 function lineCandidates(state) {
-  if (state.lines.size >= state.maxLines) return [];
   const out = [];
   const onL = (bid) => onLine(state, bid).length > 0;
   const freightStops = new Set();
   for (const l of state.lines.values()) if (l.freight) for (const s of l.stops) freightStops.add(s);
   const farms = [...state.buildings.values()].filter((b) => b.type === 'farm' && b.active);
   const mkts = [...state.buildings.values()].filter((b) => b.type === 'market' && b.active);
+  // extend an existing line to a valuable uncovered stop — the action space
+  // shouldn't only imagine building new networks from scratch
+  const foodStops = new Set();
+  for (const l of state.lines.values()) {
+    if (l.freight) for (const s of l.stops) foodStops.add(s);
+  }
+  for (const l of [...state.lines.values()].filter((x) => !x.loop).slice(0, 3)) {
+    if (l.freight) {
+      const t = mkts.find((m) => !foodStops.has(m.id))
+        ?? farms.find((f) => f.active && !foodStops.has(f.id));
+      if (t) out.push({ stops: [...l.stops, t.id], ext: { line: l, stop: t.id },
+        why: `extend freight → #${t.id}`, freight: true });
+    } else {
+      let tw = null;
+      for (const w of state.buildings.values()) {
+        if (w.type !== 'work' || !w.active || onL(w.id)) continue;
+        if (l.color != null && w.color !== l.color) continue;
+        if ((w.demandT ?? 0) > (tw?.demandT ?? 20)) tw = w;
+      }
+      if (tw) out.push({ stops: [...l.stops, tw.id], ext: { line: l, stop: tw.id },
+        why: `extend → work#${tw.id}`, color: l.color ?? undefined });
+    }
+  }
+  // new lines need a free slot; extensions above stay legal at maxLines
+  if (state.lines.size >= state.maxLines) return out;
   for (const f of farms.slice(0, 2)) {
     if (!freightStops.has(f.id) && mkts.length) {
       const ms = mkts.slice().sort((a, b2) =>
@@ -141,16 +170,21 @@ function lineCandidates(state) {
     if (dBest) out.push({ stops: [b.id, dBest.id], why: 'rescue', rescue: true, color: a.color });
   }
   const pairs = [];
+  const foodEra = farms.some((f) => f.active);
   for (const h of state.buildings.values()) {
     if (h.type !== 'home' || !h.active || h.color == null || onL(h.id)) continue;
     for (const w of state.buildings.values()) {
-      if (w.type !== 'work' || !w.active || w.color !== h.color || onL(w.id)) continue;
+      if (!w.active || onL(w.id)) continue;
+      // commuters ride to offices AND to the food buildings they staff —
+      // both corridor shapes are worth offering
+      const commuter = w.type === 'work' || (foodEra && (w.type === 'market' || w.type === 'farm'));
+      if (!commuter || (w.color != null && w.color !== h.color)) continue;
       const d = Math.hypot(w.x - h.x, w.y - h.y);
-      if (d > 240) pairs.push({ h, w, d });
+      if (d > 180) pairs.push({ h, w, d });
     }
   }
   pairs.sort((a, b) => b.d - a.d);
-  for (const p of pairs.slice(0, 4))
+  for (const p of pairs.slice(0, 8))
     out.push({ stops: [p.h.id, p.w.id], why: 'corridor', color: p.h.color, dist: p.d });
   const seen = new Set();
   return out.filter((o) => {
@@ -158,7 +192,7 @@ function lineCandidates(state) {
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
-  }).slice(0, 10);
+  }).slice(0, 14);
 }
 
 // materialize the weekly 1-of-2 offer exactly the way the game/bot does
@@ -176,7 +210,7 @@ const noopLog = () => {};
 function enumerate(state) {
   const acts = [];
   const push = (o, apply, desc) =>
-    acts.length < MAXA && acts.push({ feat: feat(o), apply, desc });
+    acts.length < MAXA && acts.push({ feat: feat(o), apply, desc, type: o.type });
 
   if (state.upgradePending) {
     const offers = state._offers ?? makeOffers(state);
@@ -195,7 +229,9 @@ function enumerate(state) {
   const blocked = blockedCells(state);
   const goal = roadIdx.size ? mainComponentCells(state, roadIdx) : null;
 
-  // connect each unserved building (road drawn by the shared pathing)
+  // connect each unserved building (road drawn by the shared pathing) —
+  // capped so a sprawled city can't crowd every other action type off MAXA
+  const connCands = [];
   for (const b of state.buildings.values()) {
     if (b.type === 'junction') continue;
     const own = buildingCells(b);
@@ -206,11 +242,16 @@ function enumerate(state) {
     if (cost > state.roadTiles) continue;
     const wet = bridgeCost(state, cells);
     if (wet > (state.bridges ?? 0)) continue; // crossing the policy can't pay for
+    connCands.push({ b, cells, cost, wet, meter: meterOf(b) });
+  }
+  connCands.sort((x, y) => y.meter - x.meter || x.cost - y.cost);
+  for (const c of connCands.slice(0, 24)) {
+    const b = c.b;
     push(
-      { type: 'connect', color: b.color, costFrac: cost / Math.max(1, state.roadTiles),
-        bridgeFrac: wet / 12,
-        meter: meterOf(b), wait: b.waiting.length / b.capacity, dist: cells.length * CONFIG.grid.cell },
-      () => { if (buildRoad(state, cells).length) { state.roadTiles -= cost; return 0.15; } return 0; },
+      { type: 'connect', color: b.color, costFrac: c.cost / Math.max(1, state.roadTiles),
+        bridgeFrac: c.wet / 12,
+        meter: c.meter, wait: b.waiting.length / b.capacity, dist: c.cells.length * CONFIG.grid.cell },
+      () => { if (buildRoad(state, c.cells).length) { state.roadTiles -= c.cost; return 0.15; } return 0; },
       `connect ${b.type}#${b.id}${b.active ? '' : ' (pending)'}`);
   }
   const nConnects = acts.length - beforeConnects;
@@ -220,7 +261,10 @@ function enumerate(state) {
     push(
       { type: 'line', color: c.color, stops: c.stops.length, dist: c.dist,
         freight: c.freight, rescue: c.rescue, meter: Math.max(...meters) },
-      () => { newLine(state, c.stops, noopLog, c.why); return 0.15; },
+      () => {
+        if (c.ext) { extendLine(state, c.ext.line, [c.ext.stop], false); return 0.12; }
+        newLine(state, c.stops, noopLog, c.why); return 0.15;
+      },
       `line ${c.why}: ${c.stops.join('→')}`);
   }
 
@@ -260,11 +304,11 @@ function enumerate(state) {
       for (const w of state.buildings.values()) {
         if (w.type !== 'work' || !w.active || w.color !== h.color || !served(w)) continue;
         const d = Math.hypot(w.x - h.x, w.y - h.y);
-        if (d > 300) pairs.push({ a: h, b: w, d });
+        if (d > 240) pairs.push({ a: h, b: w, d });
       }
     }
     pairs.sort((x, y) => y.d - x.d);
-    for (const p of pairs.slice(0, 3)) {
+    for (const p of pairs.slice(0, 5)) {
       const mid = { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2 - 30 };
       push(
         { type: 'motorway', color: p.a.color, dist: p.d, meter: meterOf(p.b) },
@@ -278,7 +322,7 @@ function enumerate(state) {
         !n.edges.some((id) => state.roadEdges.get(id)?.roundabout));
     jns.sort((a, b) => junctionPressure(state, b) - junctionPressure(state, a));
     if (state.roundabouts > 0) {
-      for (const n of jns.slice(0, 3)) {
+      for (const n of jns.slice(0, 5)) {
         const p = junctionPressure(state, n);
         push({ type: 'roundabout', meter: Math.min(1, p / 20) },
           () => { if (placeRoundabout(state, n)) { state.roundabouts--; return 0.1; } return 0; },
@@ -286,7 +330,7 @@ function enumerate(state) {
       }
     }
     if (state.trafficLights > 0) {
-      for (const n of jns.filter((n2) => !n2.light).slice(0, 3)) {
+      for (const n of jns.filter((n2) => !n2.light).slice(0, 5)) {
         const p = junctionPressure(state, n);
         push({ type: 'light', meter: Math.min(1, p / 20) },
           () => { if (placeTrafficLight(state, n, true) === 'add') { state.trafficLights--; return 0.1; } return 0; },
@@ -304,7 +348,7 @@ function enumerate(state) {
 // channels 0..14 are strictly binary — bitpack them (COLS is byte-aligned on
 // every map); 15..17 carry densities/meters — float16. ~250KB f32 → ~25KB.
 
-const BIN_CH = 15;
+const BIN_CH = 17; // binary channels are 0..16; 17..19 carry meters/density
 
 // f32 → f16 bits: obs values are 0..1.5, so truncating the mantissa (≤1e-3
 // error) beats a full round-to-nearest — and Node <22 has no Float16Array
@@ -321,17 +365,17 @@ function f16bits(x) {
 }
 
 function encodeObs(state) {
-  const ROWB = COLS >> 3; // bytes per row per binary channel
-  const bin = Buffer.alloc(BIN_CH * ROWS * ROWB);
-  const con = new Uint16Array(3 * ROWS * COLS); // f16 bit patterns
+  const ROWB = OBSCOLS >> 3; // bytes per row per binary channel (padded width)
+  const bin = Buffer.alloc(BIN_CH * OBSROWS * ROWB);
+  const con = new Uint16Array(3 * OBSROWS * OBSCOLS); // f16 bit patterns
   const at = (c, ch) => {
     if (c.cx < 0 || c.cx >= COLS || c.cy < 0 || c.cy >= ROWS) return;
-    const i = c.cy * COLS + c.cx;
-    bin[ch * ROWS * ROWB + (i >> 3)] |= 0x80 >> (i & 7); // MSB-first == np.unpackbits
+    const i = c.cy * OBSCOLS + c.cx;
+    bin[ch * OBSROWS * ROWB + (i >> 3)] |= 0x80 >> (i & 7); // MSB-first == np.unpackbits
   };
   const atv = (c, ch, v) => {
     if (c.cx < 0 || c.cx >= COLS || c.cy < 0 || c.cy >= ROWS) return;
-    const i = (ch - BIN_CH) * ROWS * COLS + c.cy * COLS + c.cx;
+    const i = (ch - BIN_CH) * OBSROWS * OBSCOLS + c.cy * OBSCOLS + c.cx;
     const h = f16bits(v);
     if (h > con[i]) con[i] = h; // positive floats: bit order == value order
   };
@@ -343,7 +387,14 @@ function encodeObs(state) {
   for (const e of state.roadEdges.values()) {
     const ch = e.motorway ? 2 : 1;
     const dens = Math.min(1, e.vehicles.size / Math.max(1, cap));
-    for (const c of cellsAlongPolyline(e.pts)) { at(c, ch); if (!e.motorway) atv(c, 17, dens); }
+    for (const c of cellsAlongPolyline(e.pts)) { at(c, ch); if (!e.motorway) atv(c, 19, dens); }
+  }
+  // transit tracks — the policy can't extend a network it can't see
+  for (const l of state.lines.values()) {
+    for (const c of cellsAlongPolyline(linePts(state, l))) {
+      at(c, 15);
+      if (l.freight) at(c, 16);
+    }
   }
   const TYPE_CH = { home: 3, work: 4, farm: 5, market: 6, junction: 7 };
   for (const b of state.buildings.values()) {
@@ -352,8 +403,8 @@ function encodeObs(state) {
       at(c, tch);
       if (b.color != null && b.color < 6) at(c, 8 + b.color);
       if (!b.active) at(c, 14);
-      atv(c, 15, meterOf(b));
-      atv(c, 16, Math.min(1, b.waiting.length / Math.max(1, b.capacity)));
+      atv(c, 17, meterOf(b));
+      atv(c, 18, Math.min(1, b.waiting.length / Math.max(1, b.capacity)));
     }
   }
   let waitTot = 0, capTot = 0, maxMeter = 0;
@@ -385,7 +436,7 @@ function encodeObs(state) {
   return {
     bin: bin.toString('base64'),
     con: Buffer.from(con.buffer).toString('base64'),
-    glob, rows: ROWS, cols: COLS, ch: CH,
+    glob, rows: OBSROWS, cols: OBSCOLS, ch: CH,
   };
 }
 
@@ -432,6 +483,7 @@ function doReset(seed, warm = 0) {
   state.level = LEVEL;
   applyLevelFeatures(state);
   steps = 0;
+  epActs = {}; epTiles = 0; epBridges = 0;
   for (let i = 0; i < 30; i++) tick(state, STEP); // let the seed cluster open
   // reverse-curriculum warm start: the heuristic bot pre-plays a random
   // prefix so episodes reach the states runs actually die in — agent and
@@ -483,12 +535,20 @@ function serialize(r) {
 
 let pending = null; // acts from the last respond()
 
+// per-episode metrics — feed episodes.jsonl so the action histogram is a
+// visible collapse/emergence detector, not a guess
+let epActs = {}, epTiles = 0, epBridges = 0;
+
 function doStep(aIdx) {
   const acts = pending ?? enumerate(state);
   steps++;
   let bonus = 0;
   if (aIdx >= 0 && aIdx < acts.length) {
+    const rt0 = state.roadTiles, br0 = state.bridges ?? 0;
     try { bonus = acts[aIdx].apply() || 0; } catch (e) { /* bad apply = wasted action */ }
+    epActs[acts[aIdx].type] = (epActs[acts[aIdx].type] ?? 0) + 1;
+    epTiles += rt0 - state.roadTiles;
+    epBridges += br0 - (state.bridges ?? 0);
   }
   const d0 = state.delivered, f0 = state.freightDelivered;
   const sT = t0();
@@ -504,14 +564,24 @@ function doStep(aIdx) {
   reward += 2.0 * (prevExcess - ex); // meter-relief shaping
   prevExcess = ex;
   const done = !!state.gameOver || state.time >= MAX_SECONDS;
+  // the game's actual objective as a terminal bonus — shaped meter relief
+  // alone leaves the agent indifferent to crossing star thresholds
+  if (done) reward += (CONFIG.win?.stars ?? [5, 8, 11])
+    .filter((w) => state.week >= w).length;
   if (state.gameOver) reward -= 2;
   const r = respond(reward, done);
+  if (done) {
+    r.info.acts = { ...epActs };
+    r.info.tilesSpent = epTiles;
+    r.info.bridgesSpent = epBridges;
+    r.info.lines = state.lines.size;
+  }
   pending = r._acts;
   return r;
 }
 
 const rl = readline.createInterface({ input: process.stdin });
-process.stdout.write(JSON.stringify({ ready: true, ch: CH, gd: GD, afd: AFD, rows: ROWS, cols: COLS }) + '\n');
+process.stdout.write(JSON.stringify({ ready: true, ch: CH, gd: GD, afd: AFD, rows: OBSROWS, cols: OBSCOLS }) + '\n');
 rl.on('line', (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }

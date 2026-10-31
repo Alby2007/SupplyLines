@@ -45,7 +45,8 @@ def main():
     p.add_argument('--level', type=int, default=1)
     p.add_argument('--episodes', type=int, default=24)
     p.add_argument('--envs', type=int, default=8)
-    p.add_argument('--seed', type=int, default=10000, help='eval seed base')
+    p.add_argument('--seed', type=int, default=10000,
+                   help='held-out eval seed base — keep disjoint from train --seed')
     p.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = p.parse_args()
 
@@ -88,7 +89,9 @@ def main():
                 i = m['info']
                 results.append(dict(week=i['week'], time=i['time'],
                                     delivered=i['delivered'], freight=i['freight'],
-                                    reason=i['reason'], stars=stars(args.level, i['week'])))
+                                    reason=i['reason'], stars=stars(args.level, i['week']),
+                                    acts=i.get('acts'), tilesSpent=i.get('tilesSpent'),
+                                    lines=i.get('lines')))
                 if si < len(seeds):
                     m = workers[wi].reset(seeds[si])
                     si += 1
@@ -106,11 +109,21 @@ def main():
     print(f'\n=== eval level {args.level} · {len(results)} episodes ===')
     print(f'weeks: min {wks[0]} median {wks[len(wks)//2]} max {wks[-1]} mean {np.mean(wks):.1f}')
     print(f'stars: {dict(zip(*np.unique(st, return_counts=True)))} · mean {np.mean(st):.2f}')
-    print(f'delivered mean {np.mean([r["delivered"] for r in results]):.0f}')
+    print(f'delivered mean {np.mean([r["delivered"] for r in results]):.0f} · '
+          f'lines/ep {np.mean([r["lines"] or 0 for r in results]):.1f} · '
+          f'tiles/ep {np.mean([r["tilesSpent"] or 0 for r in results]):.0f}')
     causes = {}
     for r in results:
         causes[r['reason'] or 'survived'] = causes.get(r['reason'] or 'survived', 0) + 1
     print('deaths:', causes)
+    amix = {}
+    for r in results:
+        for k, v in (r['acts'] or {}).items():
+            amix[k] = amix.get(k, 0) + v
+    if amix:
+        tot = sum(amix.values())
+        print('actions:', {k: f'{v/tot:.0%}' for k, v in
+                           sorted(amix.items(), key=lambda x: -x[1])})
 
 
 if __name__ == '__main__':

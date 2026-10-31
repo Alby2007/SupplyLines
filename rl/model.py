@@ -10,7 +10,7 @@ import torch.nn as nn
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, ch=18, gd=24, afd=40, emb=160):
+    def __init__(self, ch=20, gd=24, afd=40, emb=160):
         super().__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(ch, 32, 3, padding=1), nn.ReLU(),

@@ -67,10 +67,17 @@ class EnvWorker:
 
 
 class VecEnv:
-    """N workers → batched obs/feats/mask numpy arrays. Auto-resets done envs."""
+    """N workers → batched obs/feats/mask numpy arrays. Auto-resets done envs.
+
+    `level` may be an int or a sequence cycled across workers for mixed-map
+    training (e.g. [1,1,2,3]). env_worker pads every grid to a fixed canvas
+    and one-hots the level in globals, so mixed levels batch cleanly."""
 
     def __init__(self, n, level=1, base_seed=0, warm=0):
-        self.workers = [EnvWorker(level) for _ in range(n)]
+        levels = list(level) if isinstance(level, (list, tuple)) else [level]
+        self.workers = [EnvWorker(levels[i % len(levels)]) for i in range(n)]
+        dims = {(w.ch, w.rows, w.cols, w.gd, w.afd) for w in self.workers}
+        assert len(dims) == 1, f'obs dims differ across levels: {dims}'
         self.n = n
         self.ch, self.rows, self.cols = self.workers[0].ch, self.workers[0].rows, self.workers[0].cols
         self.gd, self.afd = self.workers[0].gd, self.workers[0].afd
@@ -84,8 +91,9 @@ class VecEnv:
         return s
 
     def _pack(self, msgs):
-        # wire format: ch0-14 bitpacked in obs['bin'], ch15-17 as f16 in
-        # obs['con']; feats are f16-packed base64 — see env_worker.mjs
+        # wire format: binary channels bitpacked in obs['bin'], the trailing
+        # 3 continuous channels as f16 in obs['con']; feats are f16-packed
+        # base64 — see env_worker.mjs
         nbin = self.ch - 3
         ncells = self.rows * self.cols
         grids = np.empty((len(msgs), self.ch, self.rows, self.cols), np.float32)
