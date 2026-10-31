@@ -274,6 +274,21 @@ function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null) {
   return cells;
 }
 
+// connect-plan memo — a building's path to the network is a pure function of
+// topology (netVersion bumps on every edge/line/junction edit) and bridge
+// stock (a wet plan is only valid while affordable). A stale entry can only
+// be suboptimal, never invalid: shared cells still merge when buildRoad runs.
+const _planCache = new Map();
+let _planState = null, _planKey = '';
+function cachedPlan(state, tag, fn) {
+  const key = `${state.netVersion}:${state.bridges ?? 0}`;
+  if (state !== _planState || key !== _planKey) {
+    _planCache.clear(); _planState = state; _planKey = key;
+  }
+  if (!_planCache.has(tag)) _planCache.set(tag, fn());
+  return _planCache.get(tag);
+}
+
 // seconds until this building kills you (Infinity when safe)
 function ettl(state, b, foodEra) {
   let t = Infinity;
@@ -311,10 +326,12 @@ function tryConnect(state, b, log) {
     if (process.env.BOTTRACE) console.log(`pathToRoad start ${b.type}#${b.id}`);
     // land on the main network — and only on cells a draw can actually merge
     // into, so the endpoint never stubs out a few px short of the edge
-    const { comp, best } = edgeComponents(state);
-    const goal = mergeableGoalCells(
-      state, componentCells(roadIdx, comp, best), mainComponentNodes(state, comp, best));
-    cells = pathToRoad(state, own, roadIdx, blockedCells(state), goal);
+    cells = cachedPlan(state, `connect:${b.id}`, () => {
+      const { comp, best } = edgeComponents(state);
+      const goal = mergeableGoalCells(
+        state, componentCells(roadIdx, comp, best), mainComponentNodes(state, comp, best));
+      return pathToRoad(state, own, roadIdx, blockedCells(state), goal);
+    });
     if (process.env.BOTTRACE) console.log(`pathToRoad done ${b.type}#${b.id} cells=${cells?.length}`);
   }
   if (!cells || cells.length < 2) return false;
@@ -746,7 +763,8 @@ function decide(state, log) {
         const blocked = blockedCells(state);
         for (const b of bs) {
           if (!served(b) || mainNodes.has(b.roadNodeId)) continue;
-          const cells = pathToRoad(state, buildingCells(b), roadIdx, blocked, safeGoal);
+          const cells = cachedPlan(state, `rejoin:${b.id}`, () =>
+            pathToRoad(state, buildingCells(b), roadIdx, blocked, safeGoal));
           if (!cells || cells.length < 2) continue;
           const cost = roadCellCost(state, cells);
           if (cost > state.roadTiles) continue;
@@ -997,7 +1015,7 @@ export {
   served, blockedCells, mainComponentCells, pathToRoad, ettl, tryConnect,
   junctionJoin, insertStop, newLine, onLine, avgDist, backboneWanted,
   reachable, tryLines, pickUpgrade, junctionPressure, tryShortcut,
-  trySpecials, decide, postmortem, run,
+  trySpecials, decide, postmortem, run, cachedPlan,
 };
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

@@ -3,8 +3,9 @@
 // in : {"cmd":"reset","seed":1,"warm":120}  // warm = max seconds of bot pre-play
 //      {"cmd":"step","a":3}
 //      {"cmd":"close"}
-// out: {"obs":{"grid":<b64 f32>,"glob":[..]},"feats":[[..]..],"desc":[..],
-//       "reward":r,"done":bool,"info":{..}}
+// out: {"obs":{"bin":<b64 u8 bitpack ch0-14>,"con":<b64 f16 ch15-17>,
+//       "glob":[..]},"feats":<b64 f16>,"reward":r,"done":bool,"info":{..}}
+// (desc:[..] only when RLDESC=1; RLTIME=1 prints phase timings to stderr)
 //
 // The agent acts at DECISION cadence (0.5s sim): each step applies one action
 // then advances the sim to the next decision/upgrade/game-over. Actions are
@@ -23,7 +24,7 @@ import { roadDistancesFrom } from '../src/routing.js';
 import * as readline from 'node:readline';
 import {
   srand, tick, served, blockedCells, mainComponentCells, pathToRoad,
-  onLine, reachable, junctionPressure, newLine,
+  onLine, reachable, junctionPressure, newLine, cachedPlan,
   decide, pickUpgrade,
 } from '../autoplay.mjs';
 
@@ -81,21 +82,25 @@ function connectPlan(state, b, roadIdx, blocked, goal) {
     }
     if (!other) return null;
     let cells = cellsBetween(cellOf(b), cellOf(other));
-    if (cells.some((c) => blocked.has(cellKey(c)))) {
+    if (cells.some((c) => blocked.has(cellKey(c)) || state.water?.has(cellKey(c)))) {
       const g = new Map(buildingCells(other).map((c) => [cellKey(c), []]));
       cells = pathToRoad(state, own, g, blocked) ?? cells;
     }
     return cells;
   }
-  return pathToRoad(state, own, roadIdx, blocked, goal);
+  // connect plans memo on (netVersion, bridges) — a cached path may be
+  // suboptimal after edits but never invalid (buildRoad merges shared cells)
+  return cachedPlan(state, `connect:${b.id}`, () =>
+    pathToRoad(state, own, roadIdx, blocked, goal));
 }
 
 // straight cellsBetween with a blocked-detour fallback (for roadlink pairs)
 function planPairCells(state, fromB, toB, blocked) {
   let cells = cellsBetween(cellOf(fromB), cellOf(toB));
-  if (cells.some((c) => blocked.has(cellKey(c)))) {
+  if (cells.some((c) => blocked.has(cellKey(c)) || state.water?.has(cellKey(c)))) {
     const g = new Map(buildingCells(toB).map((c) => [cellKey(c), []]));
-    const alt = pathToRoad(state, buildingCells(fromB), g, blocked);
+    const alt = cachedPlan(state, `pair:${fromB.id}>${toB.id}`, () =>
+      pathToRoad(state, buildingCells(fromB), g, blocked));
     if (alt) cells = alt;
   }
   return cells;
@@ -296,11 +301,40 @@ function enumerate(state) {
 }
 
 // ---- observation encoder ----------------------------------------------------
+// channels 0..14 are strictly binary — bitpack them (COLS is byte-aligned on
+// every map); 15..17 carry densities/meters — float16. ~250KB f32 → ~25KB.
+
+const BIN_CH = 15;
+
+// f32 → f16 bits: obs values are 0..1.5, so truncating the mantissa (≤1e-3
+// error) beats a full round-to-nearest — and Node <22 has no Float16Array
+const _f32 = new Float32Array(1);
+const _u32 = new Uint32Array(_f32.buffer);
+function f16bits(x) {
+  _f32[0] = x;
+  const v = _u32[0];
+  const sign = (v >>> 16) & 0x8000;
+  const e = ((v >>> 23) & 0xff) - 112; // rebias 127 → 15
+  if (e <= 0) return sign;             // underflow/subnormal → 0
+  if (e >= 31) return sign | 0x7bff;   // clamp to max finite
+  return sign | (e << 10) | ((v & 0x7fffff) >> 13);
+}
 
 function encodeObs(state) {
-  const grid = new Float32Array(CH * ROWS * COLS);
-  const at = (c, ch) => { if (c.cx >= 0 && c.cx < COLS && c.cy >= 0 && c.cy < ROWS) grid[ch * ROWS * COLS + c.cy * COLS + c.cx] = 1; };
-  const atv = (c, ch, v) => { if (c.cx >= 0 && c.cx < COLS && c.cy >= 0 && c.cy < ROWS) { const i = ch * ROWS * COLS + c.cy * COLS + c.cx; if (v > grid[i]) grid[i] = v; } };
+  const ROWB = COLS >> 3; // bytes per row per binary channel
+  const bin = Buffer.alloc(BIN_CH * ROWS * ROWB);
+  const con = new Uint16Array(3 * ROWS * COLS); // f16 bit patterns
+  const at = (c, ch) => {
+    if (c.cx < 0 || c.cx >= COLS || c.cy < 0 || c.cy >= ROWS) return;
+    const i = c.cy * COLS + c.cx;
+    bin[ch * ROWS * ROWB + (i >> 3)] |= 0x80 >> (i & 7); // MSB-first == np.unpackbits
+  };
+  const atv = (c, ch, v) => {
+    if (c.cx < 0 || c.cx >= COLS || c.cy < 0 || c.cy >= ROWS) return;
+    const i = (ch - BIN_CH) * ROWS * COLS + c.cy * COLS + c.cx;
+    const h = f16bits(v);
+    if (h > con[i]) con[i] = h; // positive floats: bit order == value order
+  };
   for (const k of state.water ?? []) {
     const [cx, cy] = k.split(',').map(Number);
     at({ cx, cy }, 0);
@@ -348,7 +382,21 @@ function encodeObs(state) {
     Math.min(1.5, maxMeter),
     0, 0, 0,
   ];
-  return { grid: Buffer.from(grid.buffer).toString('base64'), glob, rows: ROWS, cols: COLS, ch: CH };
+  return {
+    bin: bin.toString('base64'),
+    con: Buffer.from(con.buffer).toString('base64'),
+    glob, rows: ROWS, cols: COLS, ch: CH,
+  };
+}
+
+// action features → base64 f16 (was ~30KB of JSON floats → ~7KB)
+function packFeats(acts) {
+  const buf = Buffer.alloc(acts.length * AFD * 2);
+  for (let i = 0; i < acts.length; i++) {
+    const f = acts[i].feat;
+    for (let j = 0; j < AFD; j++) buf.writeUInt16LE(f16bits(f[j]), (i * AFD + j) * 2);
+  }
+  return buf.toString('base64');
 }
 
 // ---- env loop ---------------------------------------------------------------
@@ -357,6 +405,13 @@ let state = null;
 let rng = null;
 let steps = 0;
 let prevExcess = 0; // worst meter pressure above the danger line — shaping
+
+// RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
+// counters stay on unconditionally and only printing is gated
+const RLTIME = !!process.env.RLTIME;
+const T = { warm: 0, tick: 0, enum: 0, encode: 0, json: 0, n: 0 };
+const t0 = () => process.hrtime.bigint();
+const add = (k, s) => { T[k] += Number(process.hrtime.bigint() - s) / 1e6; };
 
 // potential-based shaping: excess = max over buildings of pressure past 50%.
 // Reward is -excess moved into the step, so relieving a hot building pays
@@ -383,6 +438,7 @@ function doReset(seed, warm = 0) {
   // critic get gradient on week-5+ pressure from iteration 1. A quarter of
   // resets stay cold so opening play doesn't atrophy.
   const warmK = Math.random() < 0.25 ? 0 : Math.random() * warm;
+  const sW = t0();
   let t = 0, dt = 0;
   while (t < warmK && !state.gameOver) {
     tick(state, STEP);
@@ -391,13 +447,16 @@ function doReset(seed, warm = 0) {
     if (state.upgradePending) pickUpgrade(state, noopLog);
     if (dt <= 0) { dt = 0.4; decide(state, noopLog); }
   }
+  add('warm', sW);
   if (state.gameOver) return doReset(seed, 0); // bot died in warmup — cold retry
   prevExcess = excessPressure(state);
   return respond(0, false);
 }
 
 function respond(reward, done) {
+  let s = t0();
   const acts = enumerate(state);
+  add('enum', s);
   const info = {
     week: state.week, time: +state.time.toFixed(1),
     delivered: state.delivered, freight: state.freightDelivered,
@@ -405,13 +464,16 @@ function respond(reward, done) {
     reason: state.gameOver?.reason ?? null,
     steps,
   };
-  return {
+  s = t0();
+  const r = {
     obs: encodeObs(state),
-    feats: acts.map((a) => a.feat),
-    desc: acts.map((a) => a.desc),
+    feats: packFeats(acts),
     reward, done, info,
     _acts: acts, // stripped before send
   };
+  if (process.env.RLDESC) r.desc = acts.map((a) => a.desc);
+  add('encode', s);
+  return r;
 }
 
 function serialize(r) {
@@ -429,11 +491,13 @@ function doStep(aIdx) {
     try { bonus = acts[aIdx].apply() || 0; } catch (e) { /* bad apply = wasted action */ }
   }
   const d0 = state.delivered, f0 = state.freightDelivered;
+  const sT = t0();
   let t = 0, guard = 0;
   while (t < DECIDE_DT - 1e-9 && !state.gameOver && !state.upgradePending && guard++ < 240) {
     tick(state, STEP);
     t += STEP;
   }
+  add('tick', sT);
   let reward = 0.02 * t + 0.1 * (state.delivered - d0) +
     0.15 * (state.freightDelivered - f0) + bonus;
   const ex = excessPressure(state);
@@ -456,11 +520,23 @@ rl.on('line', (line) => {
       pending = null;
       const r = doReset(msg.seed ?? 1, msg.warm ?? 0);
       pending = r._acts;
+      const s = t0();
       process.stdout.write(JSON.stringify(serialize(r)) + '\n');
+      add('json', s);
     } else if (msg.cmd === 'step') {
+      T.n++;
       const r = doStep(msg.a ?? 0);
+      const s = t0();
       process.stdout.write(JSON.stringify(serialize(r)) + '\n');
+      add('json', s);
     } else if (msg.cmd === 'close') {
+      if (RLTIME) {
+        const per = Object.fromEntries(
+          Object.entries(T).filter(([k]) => k !== 'n')
+            .map(([k, v]) => [k, +(v / Math.max(1, T.n)).toFixed(2)]));
+        process.stderr.write(
+          `RLTIME total ${JSON.stringify(T)} per-step ${JSON.stringify(per)}\n`);
+      }
       process.exit(0);
     }
   } catch (e) {

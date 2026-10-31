@@ -18,15 +18,23 @@ def stars(level, week):
 
 
 def pack(msgs, w0):
-    grids = np.stack([
-        np.frombuffer(base64.b64decode(m['obs']['grid']), np.float32)
-        .reshape(w0.ch, w0.rows, w0.cols) for m in msgs])
+    # same wire format as VecEnv._pack: bitpacked binary channels + f16 rest
+    nbin = w0.ch - 3
+    ncells = w0.rows * w0.cols
+    grids = np.empty((len(msgs), w0.ch, w0.rows, w0.cols), np.float32)
     globs = np.array([m['obs']['glob'] for m in msgs], np.float32)
     feats = np.zeros((len(msgs), MAXA, w0.afd), np.float32)
     mask = np.zeros((len(msgs), MAXA), np.bool_)
     for i, m in enumerate(msgs):
-        n = len(m['feats'])
-        feats[i, :n] = m['feats']
+        o = m['obs']
+        b = np.unpackbits(np.frombuffer(base64.b64decode(o['bin']), np.uint8),
+                          count=nbin * ncells)
+        grids[i, :nbin] = b.reshape(nbin, w0.rows, w0.cols)
+        grids[i, nbin:] = np.frombuffer(
+            base64.b64decode(o['con']), np.float16).reshape(3, w0.rows, w0.cols)
+        fr = base64.b64decode(m['feats'])
+        n = len(fr) // (2 * w0.afd)
+        feats[i, :n] = np.frombuffer(fr, np.float16).reshape(n, w0.afd)
         mask[i, :n] = True
     return grids, globs, feats, mask
 

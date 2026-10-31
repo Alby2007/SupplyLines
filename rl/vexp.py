@@ -84,16 +84,25 @@ class VecEnv:
         return s
 
     def _pack(self, msgs):
+        # wire format: ch0-14 bitpacked in obs['bin'], ch15-17 as f16 in
+        # obs['con']; feats are f16-packed base64 — see env_worker.mjs
+        nbin = self.ch - 3
+        ncells = self.rows * self.cols
         grids = np.empty((len(msgs), self.ch, self.rows, self.cols), np.float32)
         globs = np.empty((len(msgs), self.gd), np.float32)
         feats = np.zeros((len(msgs), MAXA, self.afd), np.float32)
         mask = np.zeros((len(msgs), MAXA), np.bool_)
         for i, m in enumerate(msgs):
-            raw = base64.b64decode(m['obs']['grid'])
-            grids[i] = np.frombuffer(raw, np.float32).reshape(self.ch, self.rows, self.cols)
-            globs[i] = m['obs']['glob']
-            na = len(m['feats'])
-            feats[i, :na] = m['feats']
+            o = m['obs']
+            b = np.unpackbits(np.frombuffer(base64.b64decode(o['bin']), np.uint8),
+                              count=nbin * ncells)
+            grids[i, :nbin] = b.reshape(nbin, self.rows, self.cols)
+            grids[i, nbin:] = np.frombuffer(
+                base64.b64decode(o['con']), np.float16).reshape(3, self.rows, self.cols)
+            globs[i] = o['glob']
+            fr = base64.b64decode(m['feats'])
+            na = len(fr) // (2 * self.afd)
+            feats[i, :na] = np.frombuffer(fr, np.float16).reshape(na, self.afd)
             mask[i, :na] = True
         return {'grid': grids, 'glob': globs, 'feats': feats, 'mask': mask}
 
