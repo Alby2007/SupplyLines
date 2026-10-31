@@ -177,10 +177,13 @@ test('a road ending near a building still serves it', () => {
 test('a direct drive beats boarding a sparse line', () => {
   const s = createState();
   b(s, 1, 'home', 100, 100);
+  b(s, 3, 'home', 700, 100);
   b(s, 2, 'work', 400, 100);
   road(s, { x: 100, y: 100 }, { x: 400, y: 100 });
-  const line = addLine(s, [1, 2]);
-  addTrain(s, line); // one train: long headway → driving wins
+  // one train on a route with a distant mid-stop: the round trip is long,
+  // so half-headway wait makes driving win even with curb time priced in
+  const line = addLine(s, [1, 3, 2]);
+  addTrain(s, line);
   const legs = findPath(s, 1, (bb) => bb.type === 'work', { lineColor: 0 });
   assert.equal(legs[0].mode, 'road');
 });

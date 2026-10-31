@@ -1,8 +1,8 @@
 import { CONFIG } from './config.js';
-import { addTrain } from './vehicles.js';
+import { addTrain, addBus } from './vehicles.js';
 import { getTool, setTool } from './input.js';
 import { levelTerrain } from './state.js';
-import { starsEarned } from './economy.js';
+import { starsEarned, rushStatus } from './economy.js';
 
 // best-run persistence — a small JSON blob per level; the "no save" rule is
 // about the city itself, meta-progression survives reloads
@@ -36,6 +36,7 @@ let lastMotor = -1;
 let lastRound = -1;
 let lastLight = -1;
 let lastBridge = -1;
+let lastBus = -1;
 
 export const UPGRADES = [
   {
@@ -49,7 +50,9 @@ export const UPGRADES = [
     apply: (s) => {
       const lines = [...s.lines.values()];
       const target = lines.reduce((a, b) => (a.trains.length <= b.trains.length ? a : b));
-      addTrain(s, target);
+      // buses multiply too — "a train" on a bus route is another bus
+      if (target.bus) addBus(s, target);
+      else addTrain(s, target);
     },
   },
   {
@@ -118,6 +121,8 @@ export function initUI(state) {
     hotRoad: document.getElementById('hot-road'),
     hotLine: document.getElementById('hot-line'),
     hotJunction: document.getElementById('hot-junction'),
+    hotBus: document.getElementById('hot-bus'),
+    hotBusCount: document.getElementById('hot-bus-count'),
     subbar: document.getElementById('subbar'),
     hotBulldoze: document.getElementById('hot-bulldoze'),
     hotMotorway: document.getElementById('hot-motorway'),
@@ -205,6 +210,9 @@ export function initUI(state) {
   // junction is a sub-tool of the line group: re-clicking falls back to 'line'
   el.hotJunction.addEventListener('click', () =>
     setTool(getTool() === 'junction' ? 'line' : 'junction'));
+  // bus routes too — they're the road-riding member of the line family
+  el.hotBus.addEventListener('click', () =>
+    setTool(getTool() === 'bus' ? 'line' : 'bus'));
   // bulldozer is a sub-tool of the road group: re-clicking falls back to 'road'
   el.hotBulldoze.addEventListener('click', () =>
     setTool(getTool() === 'bulldoze' ? 'road' : 'bulldoze'));
@@ -225,6 +233,9 @@ export function initUI(state) {
 export function updateHUD(state) {
   el.week.textContent = `Week ${state.week}`;
   el.weekFill.style.width = `${(state.weekT / CONFIG.weekSeconds) * 100}%`;
+  // the week bar flushes amber inside the rush window — the surge sits at the
+  // same point every week, so the bar itself becomes the countdown players read
+  el.weekFill.classList.toggle('rush', rushStatus(state).active);
   el.delivered.textContent = state.delivered;
   el.freight.textContent = `${state.freightDelivered} food`;
   el.pause.innerHTML = state.paused ? '&#9654;' : '&#10074;&#10074;';
@@ -233,7 +244,7 @@ export function updateHUD(state) {
   el.s1.classList.toggle('on', state.speed === 1);
   el.s2.classList.toggle('on', state.speed === 2);
   const tool = getTool();
-  const lineGroup = tool === 'line' || tool === 'junction';
+  const lineGroup = tool === 'line' || tool === 'junction' || tool === 'bus';
   const roadGroup =
     tool === 'road' || tool === 'bulldoze' || tool === 'motorway' ||
     tool === 'roundabout' || tool === 'light';
@@ -242,6 +253,15 @@ export function updateHUD(state) {
   el.subbar.classList.toggle('hidden', !lineGroup);
   el.roadbar.classList.toggle('hidden', !roadGroup);
   el.hotJunction.classList.toggle('on', tool === 'junction');
+  // buses unlock mid-game — the slot appears once week `firstWeek` arrives
+  el.hotBus.classList.toggle('hidden', state.week < CONFIG.bus.firstWeek);
+  el.hotBus.classList.toggle('on', tool === 'bus');
+  const busCount = [...state.lines.values()].filter((l) => l.bus).length;
+  el.hotBus.classList.toggle('empty', busCount >= CONFIG.bus.max);
+  if (lastBus !== busCount) {
+    lastBus = busCount;
+    el.hotBusCount.textContent = CONFIG.bus.max - busCount;
+  }
   el.hotBulldoze.classList.toggle('on', tool === 'bulldoze');
   // the motorway slot appears once the first one is granted; empty stock dims
   el.hotMotorway.classList.toggle('hidden', !state.motorwayGranted);
@@ -277,7 +297,9 @@ export function updateHUD(state) {
     lastRoad = state.roadTiles;
     el.hotRoadCount.textContent = state.roadTiles;
   }
-  const linesLeft = state.maxLines - state.lines.size;
+  // rail slots only — buses ride the road network under their own cap
+  const railCount = state.lines.size - busCount;
+  const linesLeft = state.maxLines - railCount;
   if (lastLines !== linesLeft) {
     lastLines = linesLeft;
     el.hotLineCount.textContent = linesLeft;

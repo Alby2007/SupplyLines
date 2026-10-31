@@ -184,10 +184,64 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
   return b;
 }
 
+// a subdivision tract: `size` same-colour homes placed as one estate a few
+// cells past a random anchor building — lands with the normal incoming warn,
+// so it reads as a single event to prepare for, not six separate emergencies
+function placeSubdivision(state) {
+  const anchors = [...state.buildings.values()].filter(
+    (b) => b.active && b.type !== 'junction');
+  if (!anchors.length) return false;
+  const CS = CONFIG.grid.cell;
+  const cols = Math.floor(CONFIG.map.width / CS);
+  const rows = Math.floor(CONFIG.map.height / CS);
+  const m = Math.ceil(CONFIG.map.margin / CS);
+  const S = CONFIG.subdivision;
+  // a few anchor/direction attempts — the tract needs room off the blob edge
+  for (let t = 0; t < 8; t++) {
+    const a = anchors[Math.floor(Math.random() * anchors.length)];
+    const dir = Math.random() * Math.PI * 2;
+    const d = S.ringMin + Math.random() * (S.ringMax - S.ringMin);
+    const ac = cellOf(a);
+    const cx = ac.cx + Math.round(Math.cos(dir) * d);
+    const cy = ac.cy + Math.round(Math.sin(dir) * d);
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const region = {
+      cx0: clamp(cx - S.span, m, cols - m - 1), cx1: clamp(cx + S.span, m, cols - m - 1),
+      cy0: clamp(cy - S.span, m, rows - m - 1), cy1: clamp(cy + S.span, m, rows - m - 1),
+    };
+    if (region.cx1 - region.cx0 < 2 || region.cy1 - region.cy0 < 2) continue;
+    const color = pickColor(state, 'home');
+    const want = S.sizeMin + Math.floor(Math.random() * (S.sizeMax - S.sizeMin + 1));
+    let placed = 0;
+    for (let i = 0; i < want; i++) {
+      const b = placeBuilding(state, 'home', false, color, region);
+      if (!b) continue;
+      // tracts telegraph longer than a lone building — an estate is a burst,
+      // not an emergency; the extra warn is what makes staging it possible
+      b.openAt = state.time + (CONFIG.subdivision.warn ?? CONFIG.spawn.warnTime);
+      placed++;
+    }
+    if (placed) return placed;
+  }
+  return false;
+}
+
 export function update(state, dt) {
   if (state.buildings.size === 0) {
     seedInitial(state);
     return;
+  }
+  // tracts land on a jittered cadence once the basics exist — crowded maps
+  // just retry shortly rather than skipping the event. Each tract home
+  // defers the next organic spawn by one interval: the tract REPLACES what
+  // would have spawned anyway, so it's a spatial event (a burst to stage
+  // for), not net extra growth the network never budgeted for
+  if (CONFIG.subdivision && state.time >= (state.subdivAt ?? Infinity)) {
+    const placed = placeSubdivision(state);
+    state.subdivAt = placed
+      ? state.time + CONFIG.subdivision.every * (0.7 + Math.random() * 0.6)
+      : state.time + 20;
+    if (placed) state.spawnClock += placed * spawnInterval(state);
   }
   checkColorUnlocks(state);
   // a freshly unlocked colour gets its starter pair placed immediately —

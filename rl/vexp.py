@@ -11,7 +11,7 @@ import subprocess
 import numpy as np
 
 NODE = None
-MAXA = 64
+MAXA = 80
 
 
 def _node_bin():

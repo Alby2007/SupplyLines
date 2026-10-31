@@ -78,6 +78,38 @@ export const CONFIG = {
     interval: 5,            // avg seconds between commuter spawns per home
     jitter: 0.6,            // 1±jitter multiplier
   },
+  // weekly rush hour — a predictable surge: every week at the same weekT
+  // offset, commuter spawn clocks run `mul`× fast for `len` seconds, so the
+  // city empties onto the network on a schedule that can be prepared for
+  rush: {
+    firstWeek: 2,           // rushes begin once week 1 is done
+    at: 0.3,                // fraction into the week the surge starts
+    len: 20,                // seconds of compressed spawn clocks
+    // commuter clock speed inside the window
+    mul: (typeof process !== 'undefined' && +process.env.NORUSH) ? 1 : 2.5,
+  },
+  // subdivision tracts — occasionally a small same-colour estate lands at the
+  // city edge as one piece: a mini onboarding burst between colour unlocks
+  subdivision: {
+    first: (typeof process !== 'undefined' && +process.env.NOSUBDIV)
+      ? Infinity : 130,     // seconds until the first tract can land
+    every: 130,             // mean seconds between tracts (±30% jitter)
+    sizeMin: 2, sizeMax: 4, // homes per tract — all one colour
+    ringMin: 6, ringMax: 10,// cells outward from the anchor building
+    span: 3,                // half-extent of the tract's placement region
+    warn: 12,               // seconds of "incoming" before tract homes open —
+                            // a whole estate at 3s is unanswerable; 12s is a
+                            // staging decision (pre-connect or hold the tiles)
+  },
+  // congestion stress: a building whose frontage edges are saturated feels
+  // the jam as pressure, not just delay — meters accrue up to (1+gain)× fast.
+  // It makes bypasses instrumentally valuable for a second reason besides
+  // speed, which is what makes road hierarchy worth learning.
+  stress: { gain: (typeof process !== 'undefined' && +process.env.NOSTRESS) ? 0 : 0.5 },
+  // walking: buildings within `catch` px are walk-linked — slow, free, and
+  // congestion-immune. Short hops walk instead of calling a car, and homes
+  // near a line's stop get rail access without road frontage.
+  walk: { speed: 34, catch: 66 },
   homes: {
     residents: 3,           // a house has at most this many people out at once
   },
@@ -88,6 +120,20 @@ export const CONFIG = {
     speed: 130,             // px/s
     capacity: 6,
     dwell: 0.8,             // seconds stopped at each stop
+  },
+  // buses: transit lines that run over existing roads instead of track —
+  // free to create and no line-slot cost, but they move at car speed and
+  // share congestion like any other road user. The modal choice: rail is
+  // traffic-immune and slot-expensive, bus is free and traffic-exposed.
+  bus: {
+    max: 4,                 // bus route slots, independent of maxLines
+    capacity: 8,            // riders per bus
+    buses: 2,               // vehicles per route — a lone bus's headway loses
+    firstWeek: 3,           // buses unlock when motorways do (mid-game tool)
+    // routed hops price below raw road time: a rider on a scheduled bus is
+    // one fewer car feeding the jam — the discount internalizes that
+    // externality so buses win exactly where the roads are hurting
+    discount: 0.8,
   },
   roads: {
     carSpeed: 90,
@@ -179,6 +225,10 @@ export const CONFIG = {
     transferPenalty: 6,
     stopPenalty: 0.6,
     boardWait: 3,
+    // curb time — parking/unparking at each end of a car trip. It's the
+    // hidden cost that makes scheduled transit worth boarding at all:
+    // without it a ride can never beat a frictionless drive.
+    parkPenalty: (typeof process !== 'undefined' && +process.env.NOPARK) ? 0 : 4,
   },
 };
 

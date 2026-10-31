@@ -39,6 +39,7 @@ export function createState() {
     camera: { x: 0, y: 0 },   // world-space top-left of the 640-tile viewport
     assignClock: CONFIG.food.assignInterval,
     spawnClock: CONFIG.spawn.intervalStart,
+    subdivAt: CONFIG.subdivision?.first ?? Infinity, // next tract landing time
     water: new Set(),        // impassable water cellKeys (oasis etc.), per level
   };
 }

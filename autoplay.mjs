@@ -27,7 +27,7 @@ import { buildMotorway } from './src/motorways.js';
 import {
   addLine, addJunction, insertJunction, junctionPlacement,
 } from './src/networks.js';
-import { addTrain, awardConnectionTrains } from './src/vehicles.js';
+import { addTrain, awardConnectionTrains, addBusLine } from './src/vehicles.js';
 import {
   cellOf, cellCenter, cellKey, cellsBetween, buildingCells, nearestOnPolyline,
 } from './src/grid.js';
@@ -220,10 +220,14 @@ function heap() {
 // bridge spend, so crossings win only when the land route is worse (river
 // spans the whole map height: crossing IS the route). If the cheapest plan
 // needs more bridges than we hold, retry land-only before giving up.
+// opts.wetCost replaces the water step cost; opts.penalty(k) is a multiplicative
+// per-cell surcharge (>=0) — the RL env uses it to plan congestion-shy alternates.
 // Returns a cell path (building → road), or null.
-function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null) {
+function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null, opts = null) {
   const goal = goalIdx ?? roadIdx;
   const water = state.water;
+  const wetCost = opts?.wetCost ?? 4;
+  const penalty = opts?.penalty ?? null;
   const run = (wetOk) => {
     const dist = new Map();
     const prev = new Map();
@@ -247,7 +251,9 @@ function pathToRoad(state, fromCells, roadIdx, blocked, goalIdx = null) {
           if (blocked.has(nk)) continue;
           const wet = water?.has(nk) && !roadIdx.has(nk);
           if (wet && !wetOk) continue;
-          const step = Math.hypot(dx, dy) * (roadIdx.has(nk) ? 0.2 : wet ? 4 : 1);
+          const step = Math.hypot(dx, dy) *
+            (roadIdx.has(nk) ? 0.2 : wet ? wetCost : 1) *
+            (1 + (penalty ? penalty(nk) : 0));
           const nd = cur.d + step;
           if (nd < (dist.get(nk) ?? Infinity)) {
             dist.set(nk, nd);
@@ -427,6 +433,12 @@ function newLine(state, stops, log, why) {
 const onLine = (state, bid) =>
   [...state.lines.values()].filter((l) => l.stops.includes(bid));
 
+// maxLines budgets RAIL — bus routes ride the road network under their own cap
+const railCount = (state) =>
+  [...state.lines.values()].filter((l) => !l.bus).length;
+const busCount = (state) =>
+  [...state.lines.values()].filter((l) => l.bus).length;
+
 const avgDist = (b, list) =>
   list.length
     ? list.reduce((s, h) => s + Math.abs(h.x - b.x) + Math.abs(h.y - b.y), 0) / list.length
@@ -485,7 +497,7 @@ function reachable(state, a, fromBid) {
 }
 
 function tryLines(state, log) {
-  if (state.lines.size >= state.maxLines) return;
+  if (railCount(state) >= state.maxLines) return;
   const wanted = backboneWanted(state);
 
   // 1) freight: crates only ever flow to markets on the freight network —
@@ -523,7 +535,7 @@ function tryLines(state, log) {
   const railOwed =
     farm != null && mkts().length > 0 &&
     (!freightStops.has(farm.id) || mkts().some((m) => !freightStops.has(m.id)));
-  const passengerBudget = state.maxLines - state.lines.size - (railOwed ? 1 : 0);
+  const passengerBudget = state.maxLines - railCount(state) - (railOwed ? 1 : 0);
   if (passengerBudget <= 0) return;
 
   // 2) rescue: a building queueing unroutable agents gets a direct line to a
@@ -589,6 +601,35 @@ function tryLines(state, log) {
   }
 }
 
+// buses are the fallback transit: they ride existing roads for free but pay
+// for it in congestion exposure — the demonstrated answer when rail slots
+// are gone and a same-colour corridor still needs capacity. Best on MEDIUM
+// corridors: too short and walking beats the wait, too long and the bus's
+// own road trip is the problem it was meant to solve
+function tryBus(state, log) {
+  if (state.week < CONFIG.bus.firstWeek) return;
+  if (busCount(state) >= CONFIG.bus.max) return;
+  if (railCount(state) < state.maxLines) return; // rail first — it's traffic-immune
+  let best = null;
+  for (const h of state.buildings.values()) {
+    if (h.type !== 'home' || !h.active || h.color == null || !served(h)) continue;
+    if (onLine(state, h.id).length) continue;
+    for (const w of state.buildings.values()) {
+      if (w.type !== 'work' || !w.active || w.color !== h.color || !served(w)) continue;
+      if (onLine(state, w.id).length) continue;
+      const d = Math.hypot(w.x - h.x, w.y - h.y);
+      if (d < 200 || d > 640) continue;
+      // prefer the corridor whose direct drive hurts most — jammed frontage
+      // at either end is where a shared ride pays for itself
+      const s = economy.servingStress(state, h) + economy.servingStress(state, w);
+      if (!best || s > best.s) best = { h, w, d, s };
+    }
+  }
+  if (best && addBusLine(state, [best.h.id, best.w.id])) {
+    log(`bus route home#${best.h.id}→work#${best.w.id} (${Math.round(best.d)}px, rail slots full)`);
+  }
+}
+
 // what the player would pick from a two-offer weekly choice
 function pickUpgrade(state, log) {
   const valid = UPGRADES.filter((u) => u.ok(state));
@@ -614,7 +655,7 @@ function pickUpgrade(state, log) {
     // ~6–10 bridges per river crossing — below that the next cross-river
     // spawn is a hard wall, which outranks even an empty tile bank
     if (n.includes('Bridges')) return state.bridges < 6 ? 105 : (state.bridges < 14 ? 55 : 15);
-    if (n.includes('transit line')) return state.lines.size >= state.maxLines ? 90 : 5;
+    if (n.includes('transit line')) return railCount(state) >= state.maxLines ? 90 : 5;
     if (n.includes('market delivery truck')) return homesHungry ? 85 : 40;
     if (n.includes('Add a train')) {
       if (cratesQueued && freightLine) return 80;
@@ -790,6 +831,7 @@ function decide(state, log) {
     }
   }
   if (!process.env.BOTNOLN) tryLines(state, log);
+  if (!process.env.BOTNOBUS) tryBus(state, log);
   if (!process.env.BOTNOSP) { tryShortcut(state, log); trySpecials(state, log); }
 }
 

@@ -227,12 +227,22 @@ function drawLine(ctx, state, line) {
   if (pts.length < 2) return;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = CONFIG.lines.width + 3;
-  strokePolyline(ctx, pts);
-  ctx.strokeStyle = PAL(line.color) ?? INK;
-  ctx.lineWidth = CONFIG.lines.width;
-  strokePolyline(ctx, pts);
+  if (line.bus) {
+    // a bus route's chord is its service area, not a track — draw it dashed
+    // and thin so the map doesn't claim asphalt it doesn't own
+    ctx.strokeStyle = PAL(line.color) ?? INK;
+    ctx.lineWidth = Math.max(2, CONFIG.lines.width - 2);
+    ctx.setLineDash([7, 6]);
+    strokePolyline(ctx, pts);
+    ctx.setLineDash([]);
+  } else {
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = CONFIG.lines.width + 3;
+    strokePolyline(ctx, pts);
+    ctx.strokeStyle = PAL(line.color) ?? INK;
+    ctx.lineWidth = CONFIG.lines.width;
+    strokePolyline(ctx, pts);
+  }
   for (const id of line.stops) {
     const b = state.buildings.get(id);
     if (!b) continue;
@@ -434,6 +444,17 @@ function drawCar(ctx, v) {
     roundRect(ctx, -6, -3.5, 12, 7, 3); // commuter capsule
     ctx.fill();
     ctx.stroke();
+  } else if (v.kind === 'walker') {
+    // a pedestrian — just a dot cutting across open ground
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (v.kind === 'bus') {
+    // longer capsule than a car — reads as "transit on the road"
+    ctx.strokeStyle = '#fff';
+    roundRect(ctx, -8, -3.5, 16, 7, 3.5);
+    ctx.fill();
+    ctx.stroke();
   } else {
     // boxy delivery truck: cargo bed + cab nose — reads at a glance vs cars
     ctx.strokeStyle = v.kind === 'milkTruck' ? '#8a857e' : '#fff';
@@ -466,7 +487,9 @@ function drawDraft(ctx, state, draft) {
   ctx.lineWidth = CONFIG.lines.width;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  if (draft.bus) ctx.setLineDash([7, 6]); // bus drafts ghost as dashed, like the route
   if (pts.length >= 2) strokePolyline(ctx, pts);
+  ctx.setLineDash([]);
   ctx.globalAlpha = 1;
   for (const b of bs) {
     ctx.strokeStyle = color;

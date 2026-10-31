@@ -78,6 +78,42 @@ motorways and transit lines can pass over.
 | `work.shiftLen` | 18 | Seconds an office worker stays before heading home |
 | `food.shiftLen` | 180 | Seconds a farm/market worker stays |
 
+## Rush hour & subdivisions
+
+| Key | Default | Effect |
+|---|---|---|
+| `rush.firstWeek` | 2 | Week the surges begin |
+| `rush.at` | 0.3 | Fraction into the week the window starts (≈18s in) |
+| `rush.len` | 20 | Seconds the window lasts |
+| `rush.mul` | 2.5 | Commuter spawn-clock speed inside the window |
+| `subdivision.first` | 130 | Seconds until the first tract can land |
+| `subdivision.every` | 130 | Mean seconds between tracts (±30% jitter) |
+| `subdivision.sizeMin`/`sizeMax` | 2/4 | Homes per tract — all one colour |
+| `subdivision.ringMin`/`ringMax` | 6/10 | Cells outward from the anchor building |
+| `subdivision.span` | 3 | Half-extent of the tract's placement region |
+| `subdivision.warn` | 12 | Seconds a tract telegraphs before opening (vs the 3s norm) |
+
+Tract homes consume spawn budget: each placed home defers the next organic
+spawn by one `spawnInterval`, so tracts reshape growth rather than adding to it.
+
+## Streets under strain (`economy.js`, `routing.js`, `vehicles.js`)
+
+| Key | Default | Effect |
+|---|---|---|
+| `stress.gain` | 0.5 | Meter-rate multiplier at fully saturated frontage (homes' hunger, works' demand) |
+| `walk.catch` | 66 | Max px between buildings for a walking link |
+| `walk.speed` | 34 | Walker px/s — slower than a car, congestion-immune |
+| `bus.max` | 4 | Bus route slots — independent of `maxLines` |
+| `bus.capacity` | 8 | Riders per bus |
+| `bus.buses` | 2 | Vehicles per route (staggered — a lone bus's headway can't compete) |
+| `bus.firstWeek` | 3 | When buses unlock (with motorways) |
+| `bus.discount` | 0.8 | Route-cost discount — riders on a shared bus are cars the jam never sees |
+| `costs.parkPenalty` | 4 | Curb/parking seconds priced into each car trip — what makes transit worth boarding |
+
+Env overrides for ablation runs (all falsy-safe in the browser): `NOSTRESS`,
+`NOPARK`, `NOWALK`, `NORUSH`, `NOSUBDIV` each zero out their mechanic;
+`BOTNOBUS`, `BOTNOLN`, `BOTNOSP`, `BOTNORD` gate bot strategies.
+
 ## Trains (`networks.js`, `vehicles.js`)
 
 | Key | Default | Effect |

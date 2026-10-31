@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { addLine, extendLine, endpointLines, addJunction, insertJunction, junctionPlacement, junctionCanJoin, demolishLines } from './networks.js';
-import { addTrain, awardConnectionTrains } from './vehicles.js';
+import { addTrain, awardConnectionTrains, addBusLine } from './vehicles.js';
 import { buildRoad, roadCellCost, nearestEdgePoint, demolishRoad } from './roads.js';
 import { buildMotorway } from './motorways.js';
 import { placeRoundabout, roundaboutGhost } from './roundabouts.js';
@@ -151,13 +151,26 @@ export function initInput(canvas, state, toWorld) {
       return;
     }
 
-    if (tool !== 'line') return; // no tool armed → click does nothing
+    if (tool !== 'line' && tool !== 'bus') return; // no tool armed → click does nothing
     const b = hitBuilding(state, p);
     // neutral buildings can't be stops — except farms, which start freight lines
     if (!b || !b.active || (b.color == null && b.type !== 'farm')) return;
+    // buses stop only where roads reach — no frontage, no stop; and never at
+    // junctions/farms (a bus carries people on roads, nothing else exists there)
+    if (tool === 'bus' && (b.roadNodeId == null || b.type === 'junction' || b.type === 'farm')) return;
     const ends = endpointLines(state, b.id);
-    const extend = ends.length === 1 ? ends[0] : null;
-    if (!extend && state.lines.size >= state.maxLines) return;
+    // a bus draft extends only bus lines, a line draft only rail lines
+    const matchMode = (l) => (tool === 'bus' ? !!l.bus : !l.bus);
+    const extend = ends.length === 1 && matchMode(ends[0]) ? ends[0] : null;
+    if (!extend) {
+      if (tool === 'bus') {
+        const busCount = [...state.lines.values()].filter((l) => l.bus).length;
+        if (busCount >= CONFIG.bus.max) return;
+      } else {
+        const railCount = [...state.lines.values()].filter((l) => !l.bus).length;
+        if (railCount >= state.maxLines) return;
+      }
+    }
     draft = {
       stops: [b.id],
       color: extend ? extend.color : (b.color ?? null),
@@ -165,6 +178,7 @@ export function initInput(canvas, state, toWorld) {
       extend,
       prepend: extend ? extend.stops[0] === b.id : false,
       freight: extend ? !!extend.freight : b.type === 'farm',
+      bus: tool === 'bus',
     };
     canvas.setPointerCapture(e.pointerId);
   });
@@ -213,6 +227,10 @@ export function initInput(canvas, state, toWorld) {
     const s = draft.stops;
     if (b.id === s[s.length - 2]) { s.pop(); return; }
     if (b.id === s[s.length - 1] || s.includes(b.id)) return;
+    // bus routes can't touch junctions, farms, or anything without frontage —
+    // checked before the farm block, which would otherwise flip the draft to
+    // freight and corrupt the route's mode
+    if (draft.bus && (b.type === 'junction' || b.type === 'farm' || b.roadNodeId == null)) return;
     // freight vs people: farms flip a draft to freight and can't mix with
     // home/work stops — a freight line carries crates, never commuters
     if (b.type === 'farm') {
@@ -281,10 +299,14 @@ export function initInput(canvas, state, toWorld) {
       const added = d.stops.slice(1);
       if (added.length) extendLine(state, d.extend, added, d.prepend);
     } else if (d.stops.length >= 2) {
-      const line = addLine(state, d.stops);
-      addTrain(state, line);
-      // a line that lands on junctions of existing lines awards each a train
-      awardConnectionTrains(state, line);
+      if (d.bus) {
+        addBusLine(state, d.stops); // self-validates road reach + spawns a bus
+      } else {
+        const line = addLine(state, d.stops);
+        addTrain(state, line);
+        // a line that lands on junctions of existing lines awards each a train
+        awardConnectionTrains(state, line);
+      }
     }
   };
   canvas.addEventListener('pointerup', finish);
@@ -321,6 +343,7 @@ export function initInput(canvas, state, toWorld) {
     else if (e.key === '2') state.speed = 2;
     else if (k === 'l') setTool('line');
     else if (k === 'j') setTool('junction');
+    else if (k === 'u' && state.week >= CONFIG.bus.firstWeek) setTool('bus');
     else if (k === 'r') setTool('road');
     else if (k === 'b') setTool('bulldoze');
     else if (k === 'm' && state.motorways > 0) setTool('motorway');

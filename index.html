@@ -42,10 +42,21 @@
         </button>
       </div>
       <div id="subbar" class="hidden">
-        <button id="hot-junction" class="hot sub" title="junction">
+        <button id="hot-junction" class="hot sub" title="Junction (J) — interchange stop on a line's track">
           <svg viewBox="0 0 28 28" width="22" height="22">
             <circle cx="14" cy="14" r="8" fill="none" stroke="#6b6560" stroke-width="3"/>
           </svg>
+        </button>
+        <button id="hot-bus" class="hot sub hidden" title="Bus route (U) — transit over existing roads">
+          <svg viewBox="0 0 28 28" width="22" height="22">
+            <rect x="4" y="7" width="20" height="13" rx="4" fill="#457b9d"/>
+            <rect x="7" y="10" width="4" height="4" rx="1" fill="#f5f2ec"/>
+            <rect x="12" y="10" width="4" height="4" rx="1" fill="#f5f2ec"/>
+            <rect x="17" y="10" width="4" height="4" rx="1" fill="#f5f2ec"/>
+            <circle cx="9" cy="21" r="2" fill="#4a453f"/>
+            <circle cx="19" cy="21" r="2" fill="#4a453f"/>
+          </svg>
+          <span class="hot-badge" id="hot-bus-count">0</span>
         </button>
       </div>
       <div id="roadbar" class="hidden">

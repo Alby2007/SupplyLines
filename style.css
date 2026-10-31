@@ -25,6 +25,7 @@ html, body {
   background: #d6d2c8; border-radius: 3px; overflow: hidden;
 }
 #week-bar-fill { height: 100%; width: 0%; background: #457b9d; }
+#week-bar-fill.rush { background: #e9a13b; }
 
 #hud-delivered { font-weight: 700; }
 

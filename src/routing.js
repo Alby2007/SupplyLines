@@ -31,8 +31,38 @@ export function edgeLength(e) {
   return len;
 }
 
+// per-hop road travel time for a bus line's stops, in seconds — legs cache
+// on netVersion (topology only), while the cost re-prices on every call via
+// live congestFactor: a bus route slows exactly when the roads it rides do.
+// A hop whose path has gone (roads demolished) reads null — the route's dead.
+export function busHopTimes(state, line) {
+  const cache = (line._hop ??= { v: -1, legs: [] });
+  if (cache.v !== state.netVersion) {
+    cache.v = state.netVersion;
+    cache.legs = [];
+    const n = line.stops.length;
+    const segs = line.loop ? n : n - 1;
+    for (let i = 0; i < segs; i++) {
+      const legs = findPathTo(state, line.stops[i], line.stops[(i + 1) % n],
+        { modes: { line: false, road: true } });
+      cache.legs[i] = legs?.find((l) => l.mode === 'road') ?? null;
+    }
+  }
+  return cache.legs.map((leg) => {
+    if (!leg) return null;
+    let t = 0;
+    for (const eid of leg.edgeIds) {
+      const e = state.roadEdges.get(eid);
+      if (!e) return null; // mid-route edge demolished — the hop is broken
+      const spd = CONFIG.roads.carSpeed * (e.motorway ? CONFIG.motorways.speedFactor : 1);
+      t += edgeLength(e) / Math.max(10, spd * congestFactor(state, e));
+    }
+    return t;
+  });
+}
+
 export function buildGraph(state, modes = null) {
-  const use = modes ?? { line: true, road: true };
+  const use = modes ?? { line: true, road: true, walk: true };
   const nodes = new Map();
   const adj = new Map();
   const ensure = (k) => { if (!adj.has(k)) adj.set(k, []); };
@@ -50,6 +80,30 @@ export function buildGraph(state, modes = null) {
   for (const line of state.lines.values()) {
     const n = line.stops.length;
     const segs = line.loop ? n : n - 1;
+    if (line.bus) {
+      // bus hops cost what the road actually costs right now — a jammed
+      // corridor degrades the bus exactly like the cars it's stuck in.
+      // A broken hop strands the whole route (the bus retries forever),
+      // so the graph simply drops the line: riders must find another way.
+      const hops = busHopTimes(state, line);
+      if (!hops.some((h) => h == null)) {
+        const roadTime = hops.reduce((s, h) => s + h, 0);
+        const cycle = (line.loop ? roadTime : 2 * roadTime) +
+          (line.loop ? n : 2 * n) * CONFIG.trains.dwell;
+        const wait = Math.max(
+          CONFIG.costs.boardWait,
+          cycle / Math.max(1, line.trains.length) / 2,
+        );
+        for (let i = 0; i < segs; i++) {
+          const a = line.stops[i];
+          const b = line.stops[(i + 1) % n];
+          const cost = hops[i] * CONFIG.bus.discount + CONFIG.costs.stopPenalty;
+          adj.get(bkey(a)).push({ to: bkey(b), cost, mode: 'line', lineId: line.id, lineColor: line.color, wait, freight: false });
+          adj.get(bkey(b)).push({ to: bkey(a), cost, mode: 'line', lineId: line.id, lineColor: line.color, wait, freight: false });
+        }
+      }
+      continue;
+    }
     // expected wait to board ≈ half the headway: round-trip time ÷ trains ÷ 2.
     // A sparse line is slow to board, so direct drives beat it; adding trains
     // (or congestion slowing cars) is what makes rail worthwhile.
@@ -88,6 +142,23 @@ export function buildGraph(state, modes = null) {
     if (!e.oneway) adj.get(kb).push({ to: ka, cost, mode: 'road', edgeId: e.id });
   }
 
+  // walking catchment: buildings within `catch` px are foot-linked — slow but
+  // free and congestion-immune. A home near a transit stop walks to it
+  // (park-and-ride), and a short hop across town beats a jammed drive.
+  if (use.walk && !(typeof process !== 'undefined' && +process.env.NOWALK)) {
+    const bs = [...state.buildings.values()].filter((b) => b.active);
+    const R = CONFIG.walk.catch;
+    for (let i = 0; i < bs.length; i++) {
+      for (let j = i + 1; j < bs.length; j++) {
+        const d = dist(bs[i], bs[j]);
+        if (d > R) continue;
+        const cost = d / CONFIG.walk.speed;
+        adj.get(bkey(bs[i].id)).push({ to: bkey(bs[j].id), cost, mode: 'walk' });
+        adj.get(bkey(bs[j].id)).push({ to: bkey(bs[i].id), cost, mode: 'walk' });
+      }
+    }
+  }
+
   return { nodes, adj };
 }
 
@@ -98,7 +169,7 @@ function graphFor(state, modes) {
   const g = (state._graphs ??= { key: '', slots: {} });
   const key = `${state.netVersion}:${Math.floor(state.time / 0.8)}`;
   if (g.key !== key) { g.key = key; g.slots = {}; }
-  const mk = modes == null || (modes.line && modes.road) ? 'a' : modes.line ? 'l' : 'r';
+  const mk = modes == null ? 'a' : `${modes.line ? 1 : 0}${modes.road ? 1 : 0}${modes.walk ? 1 : 0}`;
   return (g.slots[mk] ??= buildGraph(state, modes));
 }
 
@@ -141,11 +212,15 @@ export function findPath(state, fromBid, dest, opts = {}) {
         // crates only ride freight lines — passenger trains won't take them
         if (opts.freight && !e.freight) continue;
       }
-      const em = e.mode === 'line' ? `l${e.lineId}` : 'r';
+      // crates can't walk — they're freight, they ride or drive
+      if (e.mode === 'walk' && opts.freight) continue;
+      const em = e.mode === 'line' ? `l${e.lineId}` : e.mode === 'walk' ? 'w' : 'r';
       // boarding a line costs its expected wait (once, on entry, incl. the
-      // first leg); switching transport mid-trip adds a transfer penalty
+      // first leg); a car trip pays curb/parking time; switching transport
+      // mid-trip adds a transfer penalty on top
       const pen = cur.m !== em
         ? (e.mode === 'line' ? e.wait ?? CONFIG.costs.boardWait : 0) +
+          (e.mode === 'road' ? CONFIG.costs.parkPenalty ?? 0 : 0) +
           (cur.m !== '' ? CONFIG.costs.transferPenalty : 0)
         : 0;
       const nd = cur.d + e.cost + pen;

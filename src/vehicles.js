@@ -3,7 +3,7 @@ import { nid, dist } from './state.js';
 import { roadNodeKey, nodePos, congestFactor, findPathTo } from './routing.js';
 import { polyLen, pointAtLen } from './roads.js';
 import { lightGroups } from './lights.js';
-import { lineSegPts, lineSegLen, linesThrough } from './networks.js';
+import { lineSegPts, lineSegLen, linesThrough, addLine } from './networks.js';
 
 // Arrival resolution: crates stock markets; farm/market arrivals staff shifts;
 // office workers take a shift then commute home (Motorways round trips) — the
@@ -71,6 +71,99 @@ export function addTrain(state, line, tOffset = 0) {
   state.vehicles.set(t.id, t);
   line.trains.push(t.id);
   return t;
+}
+
+// ---- buses: train-shaped service on car-shaped legs ----
+// A bus is a road vehicle that loops its line's stops: it dwells + exchanges
+// like a train, but each hop drives real road edges — it yields, queues,
+// waits at lights, and slows under congestion like every other road user.
+// `line.trains` holds its ids so deleteLine/lineLoad/etc. work unchanged.
+
+export function addBus(state, line, tOffset = 0) {
+  const home = state.buildings.get(line.stops[0]);
+  const v = {
+    id: nid(state),
+    kind: 'bus',
+    color: line.color ?? null,
+    line: line.id,
+    freight: false,
+    from: 0,          // index of the stop it's dwelling at / last reached
+    dir: 1,
+    nextIdx: null,    // stop index it's driving toward while en route
+    dwellT: CONFIG.trains.dwell + tOffset,
+    pax: [],
+    cap: CONFIG.bus.capacity,
+    segs: null, seg: 0, dist: 0,
+    // where carPos puts it while dwelling (no segs exist until it departs)
+    parkedAt: home ? { x: home.x, y: home.y, angle: 0 } : null,
+  };
+  state.vehicles.set(v.id, v);
+  line.trains.push(v.id);
+  return v;
+}
+
+function updateBus(state, v, dt) {
+  const line = state.lines.get(v.line);
+  if (!line || line.stops.length < 2) { v.dwellT = 1; return; }
+  if (v.dwellT > 0) { v.dwellT -= dt; return; }
+  if (!v.segs) {
+    // plan the hop to the next stop over the live road network
+    const n = line.stops.length;
+    const nextIdx = (v.from + v.dir + n) % n;
+    const legs = findPathTo(state, line.stops[v.from], line.stops[nextIdx],
+      { modes: { line: false, road: true } });
+    const leg = legs?.find((l) => l.mode === 'road');
+    const segs = leg && segsForLeg(state, leg);
+    if (!segs?.length) {
+      // road access demolished — the route is broken; keep retrying
+      v.dwellT = 1.5;
+      return;
+    }
+    v.nextIdx = nextIdx;
+    v.segs = segs;
+    v.seg = 0;
+    v.dist = 0;
+    registerOnEdge(state, v);
+  }
+  updateRoadVeh(state, v, dt); // drives; calls busArrive when segs run out
+}
+
+function busArrive(state, v) {
+  const line = state.lines.get(v.line);
+  v.segs = null;
+  v.seg = 0;
+  v.dist = 0;
+  if (!line) { v.dwellT = 1; return; }
+  if (v.nextIdx != null) v.from = v.nextIdx;
+  const at = state.buildings.get(line.stops[v.from]);
+  if (at) v.parkedAt = { x: at.x, y: at.y, angle: 0 };
+  const n = line.stops.length;
+  if (!line.loop) {
+    if (v.from === n - 1) v.dir = -1;
+    else if (v.from === 0) v.dir = 1;
+  }
+  exchange(state, v, line, line.stops[v.from]);
+  v.dwellT = CONFIG.trains.dwell;
+}
+
+// bus routes need every stop road-connected — no track, no frontage, no stop
+export function addBusLine(state, stopIds) {
+  const ids = [...stopIds];
+  if (ids.length < 2) return null;
+  const stops = ids.map((id) => state.buildings.get(id));
+  if (stops.some((b) => !b || !b.active || b.type === 'junction' ||
+      b.type === 'farm' || b.roadNodeId == null)) return null;
+  // every hop must be road-reachable at creation — a route planned over
+  // missing asphalt would strand its only bus on the first trip
+  for (let i = 0; i < ids.length - 1; i++) {
+    const legs = findPathTo(state, ids[i], ids[i + 1], { modes: { line: false, road: true } });
+    if (!legs?.some((l) => l.mode === 'road')) return null;
+  }
+  const line = addLine(state, ids);
+  line.bus = true;
+  // staggered pair — a lone bus's headway (half the round trip) can't compete
+  for (let i = 0; i < CONFIG.bus.buses; i++) addBus(state, line, i * 4);
+  return line;
 }
 
 // when a new line joins the network at a junction, every existing line it
@@ -305,6 +398,7 @@ export function update(state, dt) {
   }
   for (const v of [...state.vehicles.values()]) {
     if (v.kind === 'train') updateTrain(state, v, dt);
+    else if (v.kind === 'bus') updateBus(state, v, dt);
     else updateRoadVeh(state, v, dt);
   }
 }
@@ -325,7 +419,9 @@ function yieldIndex(state) {
   const B = CONFIG.roads.junctionBox;
   const idx = new Map();
   for (const w of state.vehicles.values()) {
-    if (w.kind === 'train') continue;
+    // walkers cut across open ground — they don't occupy the junction box;
+    // a dwelling bus is parked at its stop, not inside the junction either
+    if (w.kind === 'train' || w.kind === 'walker' || (w.kind === 'bus' && !w.segs)) continue;
     const p = carPos(w);
     const k = `${Math.floor(p.x / B)}:${Math.floor(p.y / B)}`;
     let arr = idx.get(k);
@@ -340,7 +436,8 @@ function yieldIndex(state) {
 function updateRoadVeh(state, v, dt) {
   const seg = v.segs[v.seg];
   const e = seg?.edgeId != null ? state.roadEdges.get(seg.edgeId) : null;
-  const base = v.kind === 'car' ? CONFIG.roads.carSpeed : CONFIG.roads.truckSpeed;
+  const base = v.kind === 'walker' ? CONFIG.walk.speed
+    : v.kind === 'car' ? CONFIG.roads.carSpeed : CONFIG.roads.truckSpeed;
   let d = base * (e ? congestFactor(state, e) : 1) * (e?.motorway ? CONFIG.motorways.speedFactor : 1) * dt;
 
   // ---- traffic: keep a gap behind the car ahead, yield at junctions ----
@@ -420,6 +517,7 @@ function updateRoadVeh(state, v, dt) {
       v.seg++;
       if (v.seg >= v.segs.length) {
         if (v.kind === 'milkTruck') milkArrive(state, v);
+        else if (v.kind === 'bus') busArrive(state, v);
         else arriveCar(state, v);
         return;
       }
@@ -430,8 +528,9 @@ function updateRoadVeh(state, v, dt) {
 }
 
 export function carPos(v) {
-  const seg = v.segs[v.seg];
-  if (!seg) return { x: 0, y: 0, angle: 0 };
+  const seg = v.segs?.[v.seg];
+  // a dwelling bus has no segs — it's parked at its current stop
+  if (!seg) return v.parkedAt ?? { x: 0, y: 0, angle: 0 };
   const p = pointAtLen(seg.pts, v.dist);
   const p2 = pointAtLen(seg.pts, Math.min(seg.len, v.dist + 2));
   const angle = Math.atan2(p2.y - p.y, p2.x - p.x);

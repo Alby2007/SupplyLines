@@ -147,6 +147,19 @@ export function update(state, dt) {
         a.retryT = 2;
       }
     }
+    if (a.legs?.[0]?.mode === 'walk') {
+      // on foot — a slow free hop to a nearby building or transit stop;
+      // walkers never carpool (there's no vehicle to share)
+      const b = state.buildings.get(a.loc);
+      const v = spawnCar(state, a, a.legs[0], 'walker');
+      if (v) {
+        const i = b.waiting.indexOf(a.id);
+        if (i >= 0) b.waiting.splice(i, 1);
+      } else {
+        a.legs = null;
+      }
+      continue;
+    }
     if (a.legs?.[0]?.mode === 'road') {
       // road trip: depart immediately as a car/truck (Motorways-style)
       const b = state.buildings.get(a.loc);

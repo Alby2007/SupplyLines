@@ -45,6 +45,7 @@ export function addLine(state, stopIds) {
     wagons: 0,
     // freight lines haul crates between farms and markets — never people
     freight: stopIds.some((id) => state.buildings.get(id)?.type === 'farm'),
+    bus: false, // addBusLine flips this — bus "track" is virtual (the roads)
   };
   state.lines.set(line.id, line);
   state.netVersion++;
@@ -60,7 +61,10 @@ export function extendLine(state, line, stopIds, prepend) {
   if (prepend) {
     for (const vid of line.trains) {
       const t = state.vehicles.get(vid);
-      if (t) t.from += stopIds.length;
+      if (t) {
+        t.from += stopIds.length;
+        if (t.nextIdx != null) t.nextIdx += stopIds.length; // buses mid-hop
+      }
     }
   }
   if (!line.loop && line.stops.length > 2 && line.stops[0] === line.stops[line.stops.length - 1]) {
@@ -82,6 +86,7 @@ export function lineCellIndex(state) {
   }
   const set = new Set();
   for (const line of state.lines.values()) {
+    if (line.bus) continue; // bus routes ride roads — no physical track to claim
     const n = line.stops.length;
     const segs = line.loop ? n : n - 1;
     for (let i = 0; i < segs; i++) {
@@ -101,6 +106,7 @@ export function lineSegCellIndex(state) {
   if (state._lineSegIdx && state._lineSegV === state.netVersion) return state._lineSegIdx;
   const idx = new Map();
   for (const line of state.lines.values()) {
+    if (line.bus) continue; // virtual geometry — junctions can't splice a road
     const n = line.stops.length;
     const segs = line.loop ? n : n - 1;
     for (let i = 0; i < segs; i++) {
@@ -280,6 +286,10 @@ export function deleteLine(state, line) {
         state.agents.delete(a.id);
       }
     }
+    // a bus dies mid-hop still registered on a road edge — unregister or the
+    // edge counts a ghost vehicle toward congestion forever
+    const eid = t.segs?.[t.seg]?.edgeId;
+    if (eid != null) state.roadEdges.get(eid)?.vehicles.delete(vid);
     state.vehicles.delete(vid);
   }
   state.lines.delete(line.id);
@@ -299,6 +309,8 @@ export function demolishLines(state, cells) {
   for (const line of [...state.lines.values()]) {
     const n = line.stops.length;
     const segs = line.loop ? n : n - 1;
+    // bus routes have no track, but their dashed chord IS the corridor the
+    // player sees — dragging through it erases the route (it's free to redo)
     for (let i = 0; i < segs; i++) {
       const pts = lineSegPts(state, line.stops[i], line.stops[(i + 1) % n]);
       if (pts && cellsAlongPolyline(pts).some((c) => cellSet.has(cellKey(c)))) {

@@ -155,6 +155,46 @@ the start of **week 4**; after that they show up in the weekly picks (each
 capped at 9 in stock). On Map 3 a bundle of **12 bridges** is gifted when
 week 1 completes — on top of the pick — and more appear in the weekly pool.
 
+## Rush hour & subdivisions
+
+From **week 2** on, a rush hour hits at the same point every week — starting a
+third of the way through and lasting 20s (`CONFIG.rush`). While it's on, every
+home's commuter clock runs 2.5× fast, so the city empties onto the network in
+one synchronized wave; the week bar flushes amber for the window. It never
+moves — the schedule *is* the warning, so hold capacity back for it.
+
+Every ~130s (±30%, starting ~t=130) a **subdivision** lands: a tract of 2–4
+same-colour homes placed together a few cells past the city's edge
+(`CONFIG.subdivision`). Tracts telegraph for 12s — much longer than a lone
+building — and each tract home *replaces* an organic spawn (the next spawns
+are deferred by one interval each), so it's a staging puzzle, not extra
+growth: the city doesn't get bigger faster, it just arrives in bursts.
+
+## Streets under strain
+
+Homes and workplaces feel the traffic at their doorstep: when the road edges
+serving a building sit saturated, its meter runs faster — hunger accrues up
+to 1.5×, workplace demand likewise (`CONFIG.stress`). A jammed frontage is a
+slow bleed no delivery schedule can fix, which is what makes bypasses, ring
+roads and transit meaningful beyond raw speed.
+
+## Walking & buses
+
+**Walking**: buildings within ~66px of each other are foot-linked — slow, free,
+and congestion-immune (`CONFIG.walk`). Homes near a rail stop get rail access
+without road frontage; a short hop across town can beat a jammed drive. It's
+what turns a junction or station into *coverage* infrastructure.
+
+**Buses**: the bus tool draws a transit line over existing roads — free to
+create, no line-slot cost — but its vehicles ride real road edges at car
+speed, yielding, queueing and slowing in traffic like everyone else
+(`CONFIG.bus`). Rail is expensive and traffic-immune; bus is free and
+traffic-exposed. A saturated bus corridor upgraded to rail strands the
+earlier route — the sunk cost is real.
+
+Loops: extending a line back onto its own first stop closes it into a loop —
+the same topology class as a drawn ring, reachable by extension.
+
 ## Stars
 
 There's no finish line — survival is the win. At game over the run earns
