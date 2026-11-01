@@ -5,8 +5,15 @@ enumerated action carries a feature vector; the actor scores each
 (embedding, action-feat) pair — a masked pointer head, so the action count
 can vary per step. Critic reads the embedding.
 """
+import os
 import torch
 import torch.nn as nn
+
+# MIOpen's conv kernels hard-fault on this RDNA3 card (hipErrorLaunchFailure /
+# segfault inside miopen_convolution, wedging the GPU) while every other op is
+# stable. Native torch convs sidestep it; RL_MIOPEN=1 opts back in.
+if not os.environ.get('RL_MIOPEN'):
+    torch.backends.cudnn.enabled = False
 
 
 class ActorCritic(nn.Module):

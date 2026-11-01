@@ -92,7 +92,7 @@ def main():
             m = torch.as_tensor(obs['mask'], device=dev)
             with torch.no_grad():
                 logits, v = net(g, gl, f, m)
-                dist = torch.distributions.Categorical(logits=logits)
+                dist = torch.distributions.Categorical(logits=logits, validate_args=False)
                 a = dist.sample()
                 logp = dist.log_prob(a)
             na = a.cpu().numpy()
@@ -165,7 +165,7 @@ def main():
                 m = torch.as_tensor(fm[mb], device=dev)
                 a = torch.as_tensor(fa[mb], device=dev)
                 logits, v = net(g, gl, f, m)
-                dist = torch.distributions.Categorical(logits=logits)
+                dist = torch.distributions.Categorical(logits=logits, validate_args=False)
                 logp = dist.log_prob(a)
                 ratio = (logp - torch.as_tensor(flogp[mb], device=dev)).exp()
                 madv = torch.as_tensor(fadv[mb], device=dev)

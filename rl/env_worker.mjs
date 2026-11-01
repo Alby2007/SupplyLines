@@ -26,7 +26,7 @@ import {
   removeJunction, removeRoadEdge,
 } from '../src/networks.js';
 import { roadDistancesFrom } from '../src/routing.js';
-import { addBusLine } from '../src/vehicles.js';
+import { addBusLine, carPos } from '../src/vehicles.js';
 import { rushStatus } from '../src/economy.js';
 import * as readline from 'node:readline';
 import {
@@ -52,7 +52,7 @@ const ROWS = Math.floor(CONFIG.map.height / CONFIG.grid.cell);
 // 40-wide grid lands in the left half and the level one-hot in globals tells
 // the policy which map it's on
 const OBSCOLS = Math.max(COLS, 80), OBSROWS = Math.max(ROWS, 32);
-const CH = 20, GD = 25, AFD = 40, MAXA = 80;
+const CH = 25, GD = 30, AFD = 40, MAXA = 80;
 
 // ---- action enumeration ---------------------------------------------------
 
@@ -705,7 +705,7 @@ function f16bits(x) {
 function encodeObs(state) {
   const ROWB = OBSCOLS >> 3; // bytes per row per binary channel (padded width)
   const bin = Buffer.alloc(BIN_CH * OBSROWS * ROWB);
-  const con = new Uint16Array(3 * OBSROWS * OBSCOLS); // f16 bit patterns
+  const con = new Uint16Array((CH - BIN_CH) * OBSROWS * OBSCOLS); // f16 bit patterns
   const at = (c, ch) => {
     if (c.cx < 0 || c.cx >= COLS || c.cy < 0 || c.cy >= ROWS) return;
     const i = c.cy * OBSCOLS + c.cx;
@@ -745,6 +745,39 @@ function encodeObs(state) {
       atv(c, 18, Math.min(1, b.waiting.length / Math.max(1, b.capacity)));
     }
   }
+  // food chain, which is where games actually die: crates piling at farms
+  // (ch20), market reserve (ch21), food-building staffing (ch22), market
+  // fleet activity (ch23), and the live road flow of milk/food trucks (ch24)
+  let staffedMkts = 0, staffedFarms = 0, mkts = 0, farms = 0;
+  for (const b of state.buildings.values()) {
+    if (b.type !== 'farm' && b.type !== 'market') continue;
+    if (b.type === 'market') { mkts++; if (b.workers.length > 0) staffedMkts++; }
+    else { farms++; if (b.workers.length >= CONFIG.food.workersNeeded) staffedFarms++; }
+    let crates = 0;
+    for (const aid of b.waiting) if (state.agents.get(aid)?.kind === 'crate') crates++;
+    const staff = Math.min(1.5, b.workers.length / Math.max(1, CONFIG.food.workersNeeded));
+    for (const c of buildingCells(b)) {
+      if (crates) atv(c, 20, Math.min(1, crates / Math.max(1, b.capacity)));
+      atv(c, 22, staff);
+      if (b.type === 'market') {
+        atv(c, 21, Math.min(1, b.stock / Math.max(1, CONFIG.food.stockpileCap)));
+        atv(c, 23, Math.min(1, (b.activeTrucks || 0) / Math.max(1, b.trucks)));
+      }
+    }
+  }
+  let activeTrucks = 0;
+  for (const v of state.vehicles.values()) {
+    if (v.kind === 'milkTruck') activeTrucks++;
+    else if (v.kind !== 'foodTruck') continue;
+    const p = carPos(v);
+    if (p) atv(cellOf(p), 24, 1);
+  }
+  let cratesQueued = 0, cratesInTransit = 0;
+  for (const a of state.agents.values()) {
+    if (a.kind !== 'crate') continue;
+    if (a.loc && typeof a.loc === 'object' && a.loc.veh != null) cratesInTransit++;
+    else cratesQueued++;
+  }
   let waitTot = 0, capTot = 0, maxMeter = 0;
   for (const b of state.buildings.values()) {
     waitTot += b.waiting.length; capTot += b.capacity;
@@ -777,6 +810,13 @@ function encodeObs(state) {
     Math.min(1, rush.in / 90),
     rush.active ? 1 : 0,
     Math.min(1, subdivIn / 120),
+    // aggregate freight health — the per-cell channels show *where*, these
+    // give the critic the *how much*
+    cratesQueued / 40,
+    cratesInTransit / 40,
+    activeTrucks / 15,
+    mkts ? staffedMkts / mkts : 0,
+    farms ? staffedFarms / farms : 0,
   ];
   return {
     bin: bin.toString('base64'),

@@ -18,8 +18,8 @@ def stars(level, week):
 
 
 def pack(msgs, w0):
-    # same wire format as VecEnv._pack: bitpacked binary channels + f16 rest
-    nbin = w0.ch - 3
+    # same wire format as VecEnv._pack: bitpacked binary channels + f16 rest;
+    # bin/con channel split derived from buffer sizes
     ncells = w0.rows * w0.cols
     grids = np.empty((len(msgs), w0.ch, w0.rows, w0.cols), np.float32)
     globs = np.array([m['obs']['glob'] for m in msgs], np.float32)
@@ -27,11 +27,14 @@ def pack(msgs, w0):
     mask = np.zeros((len(msgs), MAXA), np.bool_)
     for i, m in enumerate(msgs):
         o = m['obs']
-        b = np.unpackbits(np.frombuffer(base64.b64decode(o['bin']), np.uint8),
-                          count=nbin * ncells)
+        braw = base64.b64decode(o['bin'])
+        craw = base64.b64decode(o['con'])
+        nbin = len(braw) * 8 // ncells
+        ncon = len(craw) // 2 // ncells
+        b = np.unpackbits(np.frombuffer(braw, np.uint8), count=nbin * ncells)
         grids[i, :nbin] = b.reshape(nbin, w0.rows, w0.cols)
-        grids[i, nbin:] = np.frombuffer(
-            base64.b64decode(o['con']), np.float16).reshape(3, w0.rows, w0.cols)
+        grids[i, nbin:nbin + ncon] = np.frombuffer(
+            craw, np.float16).reshape(ncon, w0.rows, w0.cols)
         fr = base64.b64decode(m['feats'])
         n = len(fr) // (2 * w0.afd)
         feats[i, :n] = np.frombuffer(fr, np.float16).reshape(n, w0.afd)

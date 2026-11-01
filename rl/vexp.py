@@ -92,9 +92,9 @@ class VecEnv:
 
     def _pack(self, msgs):
         # wire format: binary channels bitpacked in obs['bin'], the trailing
-        # 3 continuous channels as f16 in obs['con']; feats are f16-packed
-        # base64 — see env_worker.mjs
-        nbin = self.ch - 3
+        # continuous channels as f16 in obs['con']; feats are f16-packed
+        # base64 — the bin/con channel split is derived from buffer sizes so
+        # channel additions in env_worker need no decoder change
         ncells = self.rows * self.cols
         grids = np.empty((len(msgs), self.ch, self.rows, self.cols), np.float32)
         globs = np.empty((len(msgs), self.gd), np.float32)
@@ -102,11 +102,14 @@ class VecEnv:
         mask = np.zeros((len(msgs), MAXA), np.bool_)
         for i, m in enumerate(msgs):
             o = m['obs']
-            b = np.unpackbits(np.frombuffer(base64.b64decode(o['bin']), np.uint8),
-                              count=nbin * ncells)
+            braw = base64.b64decode(o['bin'])
+            craw = base64.b64decode(o['con'])
+            nbin = len(braw) * 8 // ncells
+            ncon = len(craw) // 2 // ncells
+            b = np.unpackbits(np.frombuffer(braw, np.uint8), count=nbin * ncells)
             grids[i, :nbin] = b.reshape(nbin, self.rows, self.cols)
-            grids[i, nbin:] = np.frombuffer(
-                base64.b64decode(o['con']), np.float16).reshape(3, self.rows, self.cols)
+            grids[i, nbin:nbin + ncon] = np.frombuffer(
+                craw, np.float16).reshape(ncon, self.rows, self.cols)
             globs[i] = o['glob']
             fr = base64.b64decode(m['feats'])
             na = len(fr) // (2 * self.afd)
