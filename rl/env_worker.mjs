@@ -1,11 +1,14 @@
-// Headless RL env worker — JSON-lines over stdio.
+// Headless RL env worker — JSON-lines in, binary frames out, over stdio.
 //   node rl/env_worker.mjs --level=1
 // in : {"cmd":"reset","seed":1,"warm":120}  // warm = max seconds of bot pre-play
 //      {"cmd":"step","a":3}
 //      {"cmd":"close"}
-// out: {"obs":{"bin":<b64 u8 bitpack ch0-14>,"con":<b64 f16 ch15-17>,
-//       "glob":[..]},"feats":<b64 f16>,"reward":r,"done":bool,"info":{..}}
-// (desc:[..] only when RLDESC=1; RLTIME=1 prints phase timings to stderr)
+// out: one JSON line {"ready":true,...} at startup, then per reset/step a
+//      binary frame (see frame()): 5×u32 LE lengths [meta,bin,con,glob,feats]
+//      + payloads. meta = JSON {"reward":r,"done":bool,"info":{..}} (or
+//      {"error":..}); bin = bitpacked binary channels, con = f16 continuous
+//      channels, glob = f32, feats = f16 action features.
+// (desc:[..] in meta only when RLDESC=1; RLTIME=1 prints phase timings to stderr)
 //
 // The agent acts at DECISION cadence (0.5s sim): each step applies one action
 // then advances the sim to the next decision/upgrade/game-over. Actions are
@@ -819,20 +822,20 @@ function encodeObs(state) {
     farms ? staffedFarms / farms : 0,
   ];
   return {
-    bin: bin.toString('base64'),
-    con: Buffer.from(con.buffer).toString('base64'),
-    glob, rows: OBSROWS, cols: OBSCOLS, ch: CH,
+    bin,
+    con: Buffer.from(con.buffer, con.byteOffset, con.byteLength),
+    glob,
   };
 }
 
-// action features → base64 f16 (was ~30KB of JSON floats → ~7KB)
+// action features → raw f16 bytes (was ~30KB of JSON floats → ~7KB)
 function packFeats(acts) {
   const buf = Buffer.alloc(acts.length * AFD * 2);
   for (let i = 0; i < acts.length; i++) {
     const f = acts[i].feat;
     for (let j = 0; j < AFD; j++) buf.writeUInt16LE(f16bits(f[j]), (i * AFD + j) * 2);
   }
-  return buf.toString('base64');
+  return buf;
 }
 
 // ---- env loop ---------------------------------------------------------------
@@ -913,9 +916,24 @@ function respond(reward, done) {
   return r;
 }
 
+// wire frame (all little-endian): 5×u32 lengths [meta, bin, con, glob, feats],
+// then the payloads back to back. meta is the small JSON part (reward, done,
+// info, optional desc/error); bin/con/feats are the raw obs buffers and glob
+// is f32. Raw bytes replace base64-in-JSON: no encode/parse of ~50KB strings.
+function frame(meta, obs, feats) {
+  const m0 = Buffer.from(JSON.stringify(meta));
+  const m = Buffer.concat([m0, Buffer.alloc((4 - (m0.length % 4)) % 4, 0x20)]); // 4-byte align payloads
+  const bin = obs?.bin ?? Buffer.alloc(0), con = obs?.con ?? Buffer.alloc(0);
+  const glob = obs ? Buffer.from(new Float32Array(obs.glob).buffer) : Buffer.alloc(0);
+  const fe = feats ?? Buffer.alloc(0);
+  const hdr = Buffer.alloc(20);
+  [m, bin, con, glob, fe].forEach((b, i) => hdr.writeUInt32LE(b.length, i * 4));
+  return Buffer.concat([hdr, m, bin, con, glob, fe]);
+}
+
 function serialize(r) {
-  const { _acts, ...rest } = r;
-  return rest;
+  const { _acts, obs, feats, ...meta } = r;
+  return frame(meta, obs, feats);
 }
 
 let pending = null; // acts from the last respond()
@@ -976,13 +994,13 @@ rl.on('line', (line) => {
       const r = doReset(msg.seed ?? 1, msg.warm ?? 0);
       pending = r._acts;
       const s = t0();
-      process.stdout.write(JSON.stringify(serialize(r)) + '\n');
+      process.stdout.write(serialize(r));
       add('json', s);
     } else if (msg.cmd === 'step') {
       T.n++;
       const r = doStep(msg.a ?? 0);
       const s = t0();
-      process.stdout.write(JSON.stringify(serialize(r)) + '\n');
+      process.stdout.write(serialize(r));
       add('json', s);
     } else if (msg.cmd === 'close') {
       if (RLTIME) {
@@ -995,6 +1013,6 @@ rl.on('line', (line) => {
       process.exit(0);
     }
   } catch (e) {
-    process.stdout.write(JSON.stringify({ error: String(e?.stack ?? e) }) + '\n');
+    process.stdout.write(frame({ error: String(e?.stack ?? e) }));
   }
 });

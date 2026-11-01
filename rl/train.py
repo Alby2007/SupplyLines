@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from vexp import VecEnv, MAXA
 from model import ActorCritic
+from rollout import collect
 
 
 def parse():
@@ -42,6 +43,8 @@ def parse():
     p.add_argument('--tag', type=str, default='run')
     p.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     p.add_argument('--ckpt', type=str, default=None, help='resume from checkpoint')
+    p.add_argument('--groups', type=int, default=2,
+                   help='env groups for double-buffered rollouts (1 = no sim/GPU overlap)')
     p.add_argument('--cpu-buffer', action='store_true',
                    help='keep the PPO update buffer on the host instead of the GPU (saves ~1.7GB VRAM)')
     return p.parse_args()
@@ -55,7 +58,8 @@ def main():
     os.makedirs(run_dir, exist_ok=True)
 
     levels = [int(x) for x in args.levels.split(',')] if args.levels else args.level
-    env = VecEnv(args.envs, level=levels, base_seed=args.seed, warm=args.warmstart)
+    env = VecEnv(args.envs, level=levels, base_seed=args.seed, warm=args.warmstart,
+                 n_groups=args.groups)
     net = ActorCritic(ch=env.ch, gd=env.gd, afd=env.afd).to(dev)
     if args.ckpt:
         net.load_state_dict(torch.load(args.ckpt, map_location=dev))
@@ -77,7 +81,9 @@ def main():
     b_rew = np.zeros((T, N), np.float32)
     b_done = np.zeros((T, N), np.bool_)
 
-    obs = env.reset()
+    buf = dict(grid=b_grid, glob=b_glob, feats=b_feats, mask=b_mask, act=b_act,
+               logp=b_logp, val=b_val, rew=b_rew, done=b_done)
+    obs_g = env.split(env.reset())
     ep_stats = []
     t_start = time.time()
     step_total = 0
@@ -87,11 +93,12 @@ def main():
         cur_eps = max(args.epsend, args.eps * (args.epsdecay ** (it - 1)))
         # warm-start anneal: deep bot prefixes early, agent-owned episodes late
         env.warm = args.warmstart * (args.warmdecay ** (it - 1))
-        for t in range(T):
-            g = torch.as_tensor(obs['grid'], device=dev).float()
-            gl = torch.as_tensor(obs['glob'], device=dev)
-            f = torch.as_tensor(obs['feats'], device=dev).float()
-            m = torch.as_tensor(obs['mask'], device=dev)
+
+        def policy(o, t, sl):
+            g = torch.as_tensor(o['grid'], device=dev).float()
+            gl = torch.as_tensor(o['glob'], device=dev)
+            f = torch.as_tensor(o['feats'], device=dev).float()
+            m = torch.as_tensor(o['mask'], device=dev)
             with torch.no_grad():
                 logits, v = net(g, gl, f, m)
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
@@ -99,29 +106,21 @@ def main():
                 logp = dist.log_prob(a)
             na = a.cpu().numpy()
             if cur_eps > 0:  # epsilon-greedy: uniform over the valid mask
-                forced = np.random.rand(N) < cur_eps
+                forced = np.random.rand(len(na)) < cur_eps
                 for i in np.flatnonzero(forced):
-                    na[i] = np.random.choice(np.flatnonzero(obs['mask'][i]))
+                    na[i] = np.random.choice(np.flatnonzero(o['mask'][i]))
                 if forced.any():
                     with torch.no_grad():
                         logp = dist.log_prob(torch.as_tensor(na, device=dev))
-            # store the state the action was taken FROM before stepping —
-            # env.step's return is s_{t+1}, and pairing it with a_t teaches
-            # the policy to act on observations it never saw
-            b_grid[t] = obs['grid']
-            b_glob[t] = obs['glob']
-            b_feats[t] = obs['feats']
-            b_mask[t] = obs['mask']
-            b_act[t] = na
-            b_logp[t] = logp.cpu().numpy()
-            b_val[t] = v.cpu().numpy()
-            obs, rews, dones, infos = env.step(na)
-            for i, inf in enumerate(infos):
-                if 'episode' in inf:
-                    inf['episode']['iter'] = it
-                    ep_stats.append(inf['episode'])
-            b_rew[t] = rews
-            b_done[t] = dones
+            return na, logp.cpu().numpy(), v.cpu().numpy()
+
+        # steps are stored against the state they were taken FROM (s_t, a_t, r_t);
+        # groups of envs overlap each other's sims with the policy forward
+        eps_done = collect(env, policy, buf, obs_g, T)
+        for e in eps_done:
+            e['iter'] = it
+        ep_stats.extend(eps_done)
+        obs = {k: np.concatenate([o[k] for o in obs_g]) for k in obs_g[0]}
         step_total += T * N
 
         # GAE — next-value bootstrap on non-terminal obs (auto-reset keeps obs fresh)

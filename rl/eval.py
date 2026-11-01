@@ -3,7 +3,6 @@
   python rl/eval.py --ckpt runs/map1/latest.pt --level 1 --episodes 24
 """
 import argparse
-import base64
 import numpy as np
 import torch
 
@@ -27,15 +26,14 @@ def pack(msgs, w0):
     mask = np.zeros((len(msgs), MAXA), np.bool_)
     for i, m in enumerate(msgs):
         o = m['obs']
-        braw = base64.b64decode(o['bin'])
-        craw = base64.b64decode(o['con'])
+        braw, craw = o['bin'], o['con']
         nbin = len(braw) * 8 // ncells
         ncon = len(craw) // 2 // ncells
         b = np.unpackbits(np.frombuffer(braw, np.uint8), count=nbin * ncells)
         grids[i, :nbin] = b.reshape(nbin, w0.rows, w0.cols)
         grids[i, nbin:nbin + ncon] = np.frombuffer(
             craw, np.float16).reshape(ncon, w0.rows, w0.cols)
-        fr = base64.b64decode(m['feats'])
+        fr = m['feats']
         n = len(fr) // (2 * w0.afd)
         feats[i, :n] = np.frombuffer(fr, np.float16).reshape(n, w0.afd)
         mask[i, :n] = True
