@@ -50,13 +50,24 @@ class EnvWorker:
         self.proc.stdin.write(json.dumps(msg) + '\n')
         self.proc.stdin.flush()
 
-    def reset(self, seed, warm=0):
+    # send/recv halves let VecEnv fire every worker before reading any reply,
+    # so the sims run concurrently instead of one at a time
+    def send_reset(self, seed, warm=0):
         self._send({'cmd': 'reset', 'seed': seed, 'warm': warm})
+
+    def send_step(self, a):
+        self._send({'cmd': 'step', 'a': int(a)})
+
+    def recv(self):
         return self._read()
 
+    def reset(self, seed, warm=0):
+        self.send_reset(seed, warm)
+        return self.recv()
+
     def step(self, a):
-        self._send({'cmd': 'step', 'a': int(a)})
-        return self._read()
+        self.send_step(a)
+        return self.recv()
 
     def close(self):
         try:
@@ -118,23 +129,29 @@ class VecEnv:
         return {'grid': grids, 'glob': globs, 'feats': feats, 'mask': mask}
 
     def reset(self):
-        msgs = [w.reset(s, self.warm) for w, s in zip(self.workers, self._seeds(self.n))]
-        return self._pack(msgs)
+        for w, s in zip(self.workers, self._seeds(self.n)):
+            w.send_reset(s, self.warm)
+        return self._pack([w.recv() for w in self.workers])
 
     def step(self, actions):
-        msgs = [w.step(a) for w, a in zip(self.workers, actions)]
+        for w, a in zip(self.workers, actions):
+            w.send_step(a)
+        msgs = [w.recv() for w in self.workers]
         rews = np.array([m['reward'] for m in msgs], np.float32)
         dones = np.array([m['done'] for m in msgs], np.bool_)
         infos = [m['info'] for m in msgs]
         obs = self._pack(msgs)
-        # auto-reset finished games; fresh obs replaces terminal obs
-        for i, (w, m) in enumerate(zip(self.workers, msgs)):
-            if m['done']:
-                infos[i]['episode'] = dict(m['info'])
-                infos[i]['truncated'] = not m['info'].get('reason')
-                rm = w.reset(int(self._seeds(1)[0]), self.warm)
-                for k in obs:
-                    obs[k][i] = self._pack([rm])[k][0]
+        # auto-reset finished games; fresh obs replaces terminal obs. Seeds are
+        # drawn in worker order and resets fired together, same results as serial
+        done_ix = [i for i, m in enumerate(msgs) if m['done']]
+        for i in done_ix:
+            infos[i]['episode'] = dict(msgs[i]['info'])
+            infos[i]['truncated'] = not msgs[i]['info'].get('reason')
+            self.workers[i].send_reset(int(self._seeds(1)[0]), self.warm)
+        for i in done_ix:
+            rm = self._pack([self.workers[i].recv()])
+            for k in obs:
+                obs[k][i] = rm[k][0]
         return obs, rews, dones, infos
 
     def close(self):

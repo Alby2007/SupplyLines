@@ -9,9 +9,12 @@ import os
 import torch
 import torch.nn as nn
 
-# MIOpen's conv kernels hard-fault on this RDNA3 card (hipErrorLaunchFailure /
-# segfault inside miopen_convolution, wedging the GPU) while every other op is
-# stable. Native torch convs sidestep it; RL_MIOPEN=1 opts back in.
+# MIOpen's GEMM-based weight-gradient conv solver (GemmWrwUniversal: per-sample
+# im2col + rocBLAS GEMM, ~512 launches/layer at minibatch 512) segfaults after
+# ~15 training updates on this RX 7600 XT (gfx1102), reproducibly and on an
+# otherwise idle GPU; rollout forwards alone are fine. Native torch convs avoid
+# it at no throughput cost (~240 SPS vs ~228 with MIOpen). RL_MIOPEN=1 opts back
+# in; MIOPEN_DEBUG_CONV_GEMM=0 also avoids the crash while keeping MIOpen on.
 if not os.environ.get('RL_MIOPEN'):
     torch.backends.cudnn.enabled = False
 
