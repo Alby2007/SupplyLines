@@ -42,6 +42,8 @@ def parse():
     p.add_argument('--tag', type=str, default='run')
     p.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     p.add_argument('--ckpt', type=str, default=None, help='resume from checkpoint')
+    p.add_argument('--cpu-buffer', action='store_true',
+                   help='keep the PPO update buffer on the host instead of the GPU (saves ~1.7GB VRAM)')
     return p.parse_args()
 
 
@@ -86,9 +88,9 @@ def main():
         # warm-start anneal: deep bot prefixes early, agent-owned episodes late
         env.warm = args.warmstart * (args.warmdecay ** (it - 1))
         for t in range(T):
-            g = torch.as_tensor(obs['grid'], device=dev)
+            g = torch.as_tensor(obs['grid'], device=dev).float()
             gl = torch.as_tensor(obs['glob'], device=dev)
-            f = torch.as_tensor(obs['feats'], device=dev)
+            f = torch.as_tensor(obs['feats'], device=dev).float()
             m = torch.as_tensor(obs['mask'], device=dev)
             with torch.no_grad():
                 logits, v = net(g, gl, f, m)
@@ -106,9 +108,9 @@ def main():
             # store the state the action was taken FROM before stepping —
             # env.step's return is s_{t+1}, and pairing it with a_t teaches
             # the policy to act on observations it never saw
-            b_grid[t] = obs['grid'].astype(np.float16)
+            b_grid[t] = obs['grid']
             b_glob[t] = obs['glob']
-            b_feats[t] = obs['feats'].astype(np.float16)
+            b_feats[t] = obs['feats']
             b_mask[t] = obs['mask']
             b_act[t] = na
             b_logp[t] = logp.cpu().numpy()
@@ -124,9 +126,9 @@ def main():
 
         # GAE — next-value bootstrap on non-terminal obs (auto-reset keeps obs fresh)
         with torch.no_grad():
-            g = torch.as_tensor(obs['grid'], device=dev)
+            g = torch.as_tensor(obs['grid'], device=dev).float()
             gl = torch.as_tensor(obs['glob'], device=dev)
-            f = torch.as_tensor(obs['feats'], device=dev)
+            f = torch.as_tensor(obs['feats'], device=dev).float()
             m = torch.as_tensor(obs['mask'], device=dev)
             _, nextv = net(g, gl, f, m)
         adv = np.zeros((T, N), np.float32)
@@ -153,32 +155,46 @@ def main():
 
         net.train()
         idx = np.arange(T * N)
-        pl = vl = el = 0.0
+        # the whole rollout lives on the GPU for the update (~1.7GB fp16), so
+        # minibatches are device-side gathers — no per-minibatch host gather or
+        # PCIe copy. --cpu-buffer keeps it on the host when VRAM is shared.
+        srcs = [fg, fgl, ff, fm, fa, flogp, fadv, fret]
+        if not args.cpu_buffer:
+            srcs = [torch.from_numpy(np.ascontiguousarray(x)).to(dev) for x in srcs]
+        sg, sgl, sf, sm, sa, slogp, sadv, sret = srcs
+
+        def take(src, mb_np, mb_t):
+            return src[mb_t] if torch.is_tensor(src) else torch.as_tensor(src[mb_np], device=dev)
+
+        pl = torch.zeros((), device=dev); vl = torch.zeros((), device=dev); el = torch.zeros((), device=dev)
         nb = 0
         for ep in range(args.epochs):
             np.random.shuffle(idx)
+            idx_t = torch.as_tensor(idx, device=dev)
             for s in range(0, T * N, args.minibatch):
-                mb = idx[s:s + args.minibatch]
-                g = torch.as_tensor(fg[mb], device=dev, dtype=torch.float32)
-                gl = torch.as_tensor(fgl[mb], device=dev)
-                f = torch.as_tensor(ff[mb], device=dev, dtype=torch.float32)
-                m = torch.as_tensor(fm[mb], device=dev)
-                a = torch.as_tensor(fa[mb], device=dev)
+                mb, mb_t = idx[s:s + args.minibatch], idx_t[s:s + args.minibatch]
+                g = take(sg, mb, mb_t).float()
+                gl = take(sgl, mb, mb_t)
+                f = take(sf, mb, mb_t).float()
+                m = take(sm, mb, mb_t)
+                a = take(sa, mb, mb_t)
                 logits, v = net(g, gl, f, m)
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
                 logp = dist.log_prob(a)
-                ratio = (logp - torch.as_tensor(flogp[mb], device=dev)).exp()
-                madv = torch.as_tensor(fadv[mb], device=dev)
+                ratio = (logp - take(slogp, mb, mb_t)).exp()
+                madv = take(sadv, mb, mb_t)
                 pg1, pg2 = -madv * ratio, -madv * ratio.clamp(1 - args.clip, 1 + args.clip)
                 ploss = torch.max(pg1, pg2).mean()
-                vloss = F.mse_loss(v, torch.as_tensor(fret[mb], device=dev))
+                vloss = F.mse_loss(v, take(sret, mb, mb_t))
                 ent = dist.entropy().mean()
                 loss = ploss + args.vf * vloss - args.ent * ent
                 opt.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(net.parameters(), 0.5)
                 opt.step()
-                pl += ploss.item(); vl += vloss.item(); el += ent.item(); nb += 1
+                pl += ploss.detach(); vl += vloss.detach(); el += ent.detach(); nb += 1
+        pl, vl, el = pl.item(), vl.item(), el.item()   # one sync per iteration, not 3 per minibatch
+        del srcs, sg, sgl, sf, sm, sa, slogp, sadv, sret
 
         if it % 5 == 0 or it == 1:
             recent = ep_stats[-30:]
