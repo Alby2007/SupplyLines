@@ -917,20 +917,21 @@ function fedThisStep(s, tPrev) {
   return n;
 }
 
-// driver-cap pressure — the diagnosed bottleneck: activeTrucks ≤ min(fleet,
-// workers) and drivers ARE market staff, so parked fleets mean unstaffed
-// markets. Fraction of the fleet that can't roll; a market gaining a worker
-// pays, one leaving costs. RL_DRIVERSHAPE=0 disables (A/B).
-const DRIVERSHAPE = process.env.RL_DRIVERSHAPE !== '0';
-let prevDriverP = 0;
-function driverPressure(s) {
-  let gap = 0, cap = 0;
+// coverage pressure — the diagnosed bottleneck: a home with assignedMarket ==
+// null has NO road-reachable same-colour market, so it can never be fed and its
+// colour's workers can't staff that market either (staffing gated by coverage:
+// −0.49 corr, ~26% unassigned flat across 235 iters). Fraction of homes
+// uncovered; an assignment pays, losing one costs. RL_COVERSHAPE=0 disables.
+const COVERSHAPE = process.env.RL_COVERSHAPE !== '0';
+let prevCoverP = 0;
+function coveragePressure(s) {
+  let homes = 0, un = 0;
   for (const b of s.buildings.values()) {
-    if (!b.active || b.type !== 'market') continue;
-    cap += b.trucks;
-    gap += Math.max(0, Math.min(b.trucks, CONFIG.food.workersNeeded + 1) - b.workers.length);
+    if (!b.active || b.type !== 'home') continue;
+    homes++;
+    if (b.assignedMarket == null) un++;
   }
-  return cap ? gap / cap : 0;
+  return homes ? un / homes : 0;
 }
 
 // ---- state archive (Go-Explore-lite) ----------------------------------------
@@ -983,7 +984,7 @@ function doReset(seed, warm = 0) {
     lastSnapWeek = state.week;
     prevExcess = excessPressure(state);
     prevHungerP = hungerPressure(state);
-    prevDriverP = driverPressure(state);
+    prevCoverP = coveragePressure(state);
     return respond(0, false);
   }
   epRestored = 0;
@@ -1013,7 +1014,7 @@ function doReset(seed, warm = 0) {
   if (state.gameOver) return doReset(seed, 0); // bot died in warmup — cold retry
   prevExcess = excessPressure(state);
   prevHungerP = hungerPressure(state);
-  prevDriverP = driverPressure(state);
+  prevCoverP = coveragePressure(state);
   lastSnapWeek = state.week;
   return respond(0, false);
 }
@@ -1098,10 +1099,10 @@ function doStep(aIdx) {
     reward += 0.3 * fedThisStep(state, tPrev); // chain worked end-to-end
     prevHungerP = hp;
   }
-  if (DRIVERSHAPE) {
-    const dp = driverPressure(state);
-    reward += 1.5 * (prevDriverP - dp); // fleet kept manned pays
-    prevDriverP = dp;
+  if (COVERSHAPE) {
+    const cp = coveragePressure(state);
+    reward += 2.5 * (prevCoverP - cp); // a home gaining market coverage pays
+    prevCoverP = cp;
   }
   // archive at each week boundary — one deep clone per env per week (~ms),
   // bounded; when full a random slot is replaced so all eras stay represented

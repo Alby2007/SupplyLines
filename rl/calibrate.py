@@ -20,6 +20,10 @@ MED = re.compile(r'weeks survived: min (\d+) median (\d+) max (\d+)')
 CAUSES = re.compile(r'death causes: (\{.*\})')
 
 
+def _probe_args(a):
+    return probe(*a)
+
+
 def probe(level, runs, max_weeks):
     out = subprocess.run(
         [NODE, AUTOPLAY, f'--level={level}', f'--runs={runs}',
@@ -64,7 +68,8 @@ def main():
         levels = [int(x) for x in args.levels.split(',')]
 
     with ProcessPoolExecutor(args.procs) as ex:
-        results = list(ex.map(lambda lv: probe(lv, args.runs, args.maxweeks), levels))
+        results = list(ex.map(_probe_args,
+                              [(lv, args.runs, args.maxweeks) for lv in levels]))
 
     for r in results:
         surv = r['causes'].get('SURVIVED (cap reached)', 0)

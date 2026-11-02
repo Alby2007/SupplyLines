@@ -1,0 +1,662 @@
+{
+ "levels": {
+  "101": {
+   "level": 101,
+   "min": 5,
+   "median": 7,
+   "max": 10,
+   "causes": {
+    "A workplace went understaffed": 7,
+    "A home starved": 1
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "102": {
+   "level": 102,
+   "min": 4,
+   "median": 6,
+   "max": 9,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "103": {
+   "level": 103,
+   "min": 6,
+   "median": 6,
+   "max": 7,
+   "causes": {
+    "A home starved": 2,
+    "A workplace went understaffed": 6
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "104": {
+   "level": 104,
+   "min": 5,
+   "median": 7,
+   "max": 10,
+   "causes": {
+    "A home starved": 5,
+    "A workplace went understaffed": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "105": {
+   "level": 105,
+   "min": 6,
+   "median": 8,
+   "max": 9,
+   "causes": {
+    "A workplace went understaffed": 5,
+    "A home starved": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "106": {
+   "level": 106,
+   "min": 4,
+   "median": 8,
+   "max": 10,
+   "causes": {
+    "A workplace went understaffed": 6,
+    "A home starved": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "107": {
+   "level": 107,
+   "min": 7,
+   "median": 8,
+   "max": 9,
+   "causes": {
+    "A workplace went understaffed": 4,
+    "A home starved": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "108": {
+   "level": 108,
+   "min": 5,
+   "median": 5,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 3,
+    "A home starved": 5
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "109": {
+   "level": 109,
+   "min": 5,
+   "median": 9,
+   "max": 11,
+   "causes": {
+    "A workplace went understaffed": 5,
+    "A home starved": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "easy"
+  },
+  "110": {
+   "level": 110,
+   "min": 5,
+   "median": 5,
+   "max": 7,
+   "causes": {
+    "A workplace went understaffed": 8
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "111": {
+   "level": 111,
+   "min": 6,
+   "median": 9,
+   "max": 12,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "easy"
+  },
+  "112": {
+   "level": 112,
+   "min": 6,
+   "median": 8,
+   "max": 11,
+   "causes": {
+    "A workplace went understaffed": 3,
+    "A home starved": 5
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "113": {
+   "level": 113,
+   "min": 4,
+   "median": 4,
+   "max": 7,
+   "causes": {
+    "A home starved": 4,
+    "A workplace went understaffed": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "hard"
+  },
+  "114": {
+   "level": 114,
+   "min": 4,
+   "median": 5,
+   "max": 8,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "115": {
+   "level": 115,
+   "min": 5,
+   "median": 6,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 4,
+    "A home starved": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "116": {
+   "level": 116,
+   "min": 4,
+   "median": 5,
+   "max": 7,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "117": {
+   "level": 117,
+   "min": 4,
+   "median": 5,
+   "max": 8,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "118": {
+   "level": 118,
+   "min": 4,
+   "median": 9,
+   "max": 10,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "easy"
+  },
+  "119": {
+   "level": 119,
+   "min": 4,
+   "median": 8,
+   "max": 11,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "120": {
+   "level": 120,
+   "min": 4,
+   "median": 5,
+   "max": 8,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "121": {
+   "level": 121,
+   "min": 7,
+   "median": 8,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 5,
+    "A home starved": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "122": {
+   "level": 122,
+   "min": 6,
+   "median": 8,
+   "max": 12,
+   "causes": {
+    "A workplace went understaffed": 7,
+    "A home starved": 1
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "123": {
+   "level": 123,
+   "min": 4,
+   "median": 6,
+   "max": 7,
+   "causes": {
+    "A workplace went understaffed": 6,
+    "A workplace overflowed": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "124": {
+   "level": 124,
+   "min": 6,
+   "median": 9,
+   "max": 12,
+   "causes": {
+    "A home starved": 5,
+    "A workplace went understaffed": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "easy"
+  },
+  "125": {
+   "level": 125,
+   "min": 4,
+   "median": 6,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 7,
+    "A home starved": 1
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "126": {
+   "level": 126,
+   "min": 4,
+   "median": 7,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 5,
+    "A home starved": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "127": {
+   "level": 127,
+   "min": 6,
+   "median": 8,
+   "max": 12,
+   "causes": {
+    "A home starved": 7,
+    "SURVIVED (cap reached)": 1
+   },
+   "survivedShare": 0.125,
+   "tier": "medium"
+  },
+  "128": {
+   "level": 128,
+   "min": 4,
+   "median": 7,
+   "max": 9,
+   "causes": {
+    "A workplace went understaffed": 6,
+    "A home starved": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "129": {
+   "level": 129,
+   "min": 4,
+   "median": 7,
+   "max": 7,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "130": {
+   "level": 130,
+   "min": 4,
+   "median": 6,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 7,
+    "A home starved": 1
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "131": {
+   "level": 131,
+   "min": 5,
+   "median": 8,
+   "max": 9,
+   "causes": {
+    "A home starved": 4,
+    "A workplace went understaffed": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "132": {
+   "level": 132,
+   "min": 4,
+   "median": 8,
+   "max": 12,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "133": {
+   "level": 133,
+   "min": 4,
+   "median": 7,
+   "max": 8,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "134": {
+   "level": 134,
+   "min": 5,
+   "median": 5,
+   "max": 7,
+   "causes": {
+    "A home starved": 5,
+    "A workplace went understaffed": 3
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "135": {
+   "level": 135,
+   "min": 4,
+   "median": 6,
+   "max": 9,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "136": {
+   "level": 136,
+   "min": 4,
+   "median": 9,
+   "max": 9,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "easy"
+  },
+  "137": {
+   "level": 137,
+   "min": 4,
+   "median": 7,
+   "max": 8,
+   "causes": {
+    "A home starved": 7,
+    "A workplace went understaffed": 1
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "138": {
+   "level": 138,
+   "min": 4,
+   "median": 5,
+   "max": 7,
+   "causes": {
+    "A workplace went understaffed": 6,
+    "A workplace overflowed": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "139": {
+   "level": 139,
+   "min": 4,
+   "median": 6,
+   "max": 8,
+   "causes": {
+    "A workplace went understaffed": 6,
+    "A home starved": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "140": {
+   "level": 140,
+   "min": 4,
+   "median": 7,
+   "max": 9,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "141": {
+   "level": 141,
+   "min": 5,
+   "median": 7,
+   "max": 10,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "142": {
+   "level": 142,
+   "min": 5,
+   "median": 8,
+   "max": 9,
+   "causes": {
+    "A home starved": 4,
+    "A workplace went understaffed": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "143": {
+   "level": 143,
+   "min": 5,
+   "median": 6,
+   "max": 10,
+   "causes": {
+    "A home starved": 6,
+    "A workplace went understaffed": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "144": {
+   "level": 144,
+   "min": 5,
+   "median": 6,
+   "max": 9,
+   "causes": {
+    "A home starved": 4,
+    "A workplace went understaffed": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "145": {
+   "level": 145,
+   "min": 4,
+   "median": 5,
+   "max": 6,
+   "causes": {
+    "A home starved": 4,
+    "A workplace went understaffed": 4
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "146": {
+   "level": 146,
+   "min": 4,
+   "median": 7,
+   "max": 8,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "147": {
+   "level": 147,
+   "min": 5,
+   "median": 7,
+   "max": 12,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "148": {
+   "level": 148,
+   "min": 5,
+   "median": 7,
+   "max": 9,
+   "causes": {
+    "A home starved": 3,
+    "A workplace went understaffed": 5
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "149": {
+   "level": 149,
+   "min": 4,
+   "median": 6,
+   "max": 7,
+   "causes": {},
+   "survivedShare": 0.0,
+   "tier": "medium"
+  },
+  "150": {
+   "level": 150,
+   "min": 4,
+   "median": 6,
+   "max": 6,
+   "causes": {
+    "A workplace went understaffed": 6,
+    "A home starved": 2
+   },
+   "survivedShare": 0.0,
+   "tier": "medium"
+  }
+ },
+ "tiers": {
+  "medium": [
+   101,
+   102,
+   103,
+   104,
+   105,
+   106,
+   107,
+   108,
+   110,
+   112,
+   114,
+   115,
+   116,
+   117,
+   119,
+   120,
+   121,
+   122,
+   123,
+   125,
+   126,
+   127,
+   128,
+   129,
+   130,
+   131,
+   132,
+   133,
+   134,
+   135,
+   137,
+   138,
+   139,
+   140,
+   141,
+   142,
+   143,
+   144,
+   145,
+   146,
+   147,
+   148,
+   149,
+   150
+  ],
+  "easy": [
+   109,
+   111,
+   118,
+   124,
+   136
+  ],
+  "hard": [
+   113
+  ]
+ },
+ "broken": [],
+ "train": [
+  101,
+  102,
+  103,
+  104,
+  105,
+  106,
+  107,
+  108,
+  109,
+  110,
+  111,
+  112,
+  113,
+  114,
+  115,
+  116,
+  117,
+  118,
+  119,
+  120,
+  121,
+  122,
+  123,
+  125,
+  126,
+  127,
+  128,
+  129,
+  130,
+  131,
+  132,
+  133,
+  134
+ ],
+ "heldout": [
+  124,
+  135,
+  136,
+  137,
+  138,
+  139,
+  140,
+  141,
+  142,
+  143,
+  144,
+  145,
+  146,
+  147,
+  148,
+  149,
+  150
+ ]
+}
