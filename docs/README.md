@@ -46,6 +46,18 @@ System deep dives, in `systems/`:
 - [food.md](systems/food.md) — the farm → market → home chain end to end
 - [economy.md](systems/economy.md) — demand/hunger/overflow meters, weeks, upgrades
 
+The reinforcement-learning program, in `rl/`:
+
+- [rl/README.md](rl/README.md) — pipeline overview + how to run it
+- [rl/environment.md](rl/environment.md) — worker protocol, observation encoding, action space
+- [rl/training.md](rl/training.md) — PPO config, curriculum, checkpoints, throughput
+- [rl/shaping.md](rl/shaping.md) — reward terms, env flags, measured effects
+- [rl/mapgen.md](rl/mapgen.md) — generated-map suite, calibration, train/test split
+- [rl/verbs.md](rl/verbs.md) — the action vocabulary and verb-expansion program
+- [rl/analysis.md](rl/analysis.md) — episode schema, postmortems, eval tooling
+- [rl/experiments.md](rl/experiments.md) — the empirical log of what worked
+- [rl/archive.md](rl/archive.md) — frontier-state restoration (dormant)
+
 ## Source map
 
 | File | Responsibility |
