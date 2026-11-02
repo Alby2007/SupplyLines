@@ -79,10 +79,24 @@ def main():
         sd = torch.load(args.ckpt, map_location=dev)
         if args.transfer:
             own = net.state_dict()
-            ok = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}
+            ok, padded = {}, []
+            for k, v in sd.items():
+                if k not in own:
+                    continue
+                if own[k].shape == v.shape:
+                    ok[k] = v
+                elif (own[k].ndim == v.ndim and own[k].shape[:-1] == v.shape[:-1]
+                        and own[k].shape[-1] > v.shape[-1]):
+                    # same layer with a wider input (map params / new verbs):
+                    # copy the learned slice, let the new columns start fresh
+                    w = own[k].clone()
+                    w[..., :v.shape[-1]] = v
+                    ok[k] = w
+                    padded.append(f'{k} {tuple(v.shape)}->{tuple(own[k].shape)}')
             skipped = sorted(set(sd) - set(ok))
             net.load_state_dict(ok, strict=False)
-            print(f'transfer: loaded {len(ok)}/{len(sd)} keys; skipped {skipped}')
+            print(f'transfer: loaded {len(ok)}/{len(sd)} keys'
+                  + (f'; padded {padded}' if padded else '') + f'; skipped {skipped}')
         else:
             net.load_state_dict(sd)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)

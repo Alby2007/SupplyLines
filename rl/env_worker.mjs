@@ -71,14 +71,14 @@ const ROWS = Math.floor(CONFIG.map.height / CONFIG.grid.cell);
 // 40-wide grid lands in the left half and the level one-hot in globals tells
 // the policy which map it's on
 const OBSCOLS = Math.max(COLS, 80), OBSROWS = Math.max(ROWS, 32);
-const CH = 25, GD = 37, AFD = 40, MAXA = 80;
+const CH = 25, GD = 37, AFD = 44, MAXA = 80; // afd slots 41-43 reserved for future verbs
 
 // ---- action enumeration ---------------------------------------------------
 
 // type one-hots live at their slot index; 33/34 land in the tail that
 // upgrades (22..32) leave free, so checkpoints trained before demolition and
 // junctions existed still read every old action identically
-const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34 };
+const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40 };
 
 function meterOf(b) {
   if (b.type === 'work') return Math.max(0, b.demandT / CONFIG.demand.limit);
@@ -474,6 +474,46 @@ function enumerate(state) {
           meter: meterOf(p.w) },
         () => { const l = addBusLine(state, [p.h.id, p.w.id]); return l ? 0.12 : 0; },
         `bus ${p.h.id}→${p.w.id} (${Math.round(p.d)}px road-borne)`);
+    }
+  }
+
+  // hire driver: the on-demand lever on the proven bottleneck — trades road
+  // tiles for a shift-long driver on a market whose fleet outruns its staff.
+  // Masked to real driver gaps; meter = mean hunger of the homes it serves.
+  {
+    const cost = CONFIG.food.hireCost;
+    if (state.roadTiles >= cost) {
+      const hSum = new Map(), hN = new Map();
+      for (const b of state.buildings.values()) {
+        if (b.type !== 'home' || !b.active || b.assignedMarket == null) continue;
+        hSum.set(b.assignedMarket, (hSum.get(b.assignedMarket) ?? 0) + b.hungerT / CONFIG.food.hungerLimit);
+        hN.set(b.assignedMarket, (hN.get(b.assignedMarket) ?? 0) + 1);
+      }
+      const hires = [];
+      for (const m of state.buildings.values()) {
+        if (m.type !== 'market' || !m.active) continue;
+        const hired = (m.hired ?? []).filter((x) => x > state.time).length;
+        if (m.workers.length + hired >= m.trucks) continue; // fleet already manned
+        hires.push({ m, gap: m.trucks - m.workers.length - hired,
+          meter: (hSum.get(m.id) ?? 0) / Math.max(1, hN.get(m.id) ?? 1) });
+      }
+      hires.sort((a, b) => b.meter - a.meter || b.gap - a.gap);
+      for (const h of hires.slice(0, 6)) {
+        const m = h.m;
+        push(
+          { type: 'hire', color: m.color,
+            costFrac: cost / Math.max(1, state.roadTiles),
+            meter: h.meter, wait: (m.activeTrucks || 0) / Math.max(1, m.trucks) },
+          () => {
+            if (state.roadTiles < cost) return 0;
+            const hired = (m.hired ??= []).filter((x) => x > state.time);
+            if (m.workers.length + hired.length >= m.trucks) return 0; // gap closed since enum
+            state.roadTiles -= cost;
+            m.hired = [...hired, state.time + CONFIG.food.hireLen];
+            return 0.15;
+          },
+          `hire driver market#${m.id} (+${h.gap} driver gap)`);
+      }
     }
   }
 
@@ -1132,7 +1172,7 @@ function doStep(aIdx) {
     // unassigned homes can't be reached by any same-colour staffed market,
     // unstaffed farms make no crates, empty markets dispatch no trucks
     let homes = 0, hungry = 0, unassigned = 0, markets = 0, mktStaffed = 0,
-        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0, fleet = 0;
+        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0, fleet = 0, hiredDrv = 0;
     for (const b of state.buildings.values()) {
       if (!b.active) continue;
       if (b.type === 'home') {
@@ -1143,7 +1183,8 @@ function doStep(aIdx) {
         markets++;
         mktStock += b.stock || 0;
         fleet += b.trucks || 0;
-        if (b.workers.length > 0) mktStaffed++;
+        if (b.workers.length > 0 || (b.hired ?? []).some((x) => x > state.time)) mktStaffed++;
+        hiredDrv += (b.hired ?? []).filter((x) => x > state.time).length;
         trucks += b.activeTrucks || 0;
       } else if (b.type === 'farm') {
         farms++;
@@ -1151,7 +1192,7 @@ function doStep(aIdx) {
       }
     }
     r.info.food = { homes, hungry, unassigned, markets, mktStaffed, mktStock,
-                    farms, farmStaffed, trucks, fleet };
+                    farms, farmStaffed, trucks, fleet, hiredDrv };
     r.info.upgrades = epUpgrades;
     r.info.upgradeOffers = epOffers;
   }

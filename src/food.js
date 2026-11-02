@@ -56,7 +56,7 @@ function assignHomes(state) {
     const all = [...state.buildings.values()].filter(
       (b) => b.type === 'market' && b.active && b.color === color,
     );
-    const staffed = all.filter((m) => m.workers.length > 0);
+    const staffed = all.filter((m) => driversOf(state, m) > 0);
     const reach = (ms) => (ms.length ? roadDistancesFrom(state, ms.map((m) => m.id)) : null);
     const prim = reach(staffed);
     const back = staffed.length === all.length ? null : reach(all);
@@ -72,11 +72,20 @@ function assignHomes(state) {
   }
 }
 
+// drivers = commuter staff + hired drivers (m.hired is a list of expiry
+// timestamps, filtered lazily on read — entries are few and short-lived)
+function driversOf(state, m) {
+  const h = m.hired?.length ? m.hired.filter((x) => x > state.time) : [];
+  if (h.length !== (m.hired?.length ?? 0)) m.hired = h;
+  return m.workers.length + h.length;
+}
+
 function tryDispatch(state, m) {
   if (m.stock <= 0) return;
   // market staff are the truck drivers — each worker means one more truck
-  // that can be on the road, so a short-staffed market still delivers, slower
-  if ((m.activeTrucks || 0) >= Math.min(m.trucks, m.workers.length)) return;
+  // that can be on the road, so a short-staffed market still delivers, slower.
+  // hired drivers lift the same cap — the on-demand lever the agent can pull.
+  if ((m.activeTrucks || 0) >= Math.min(m.trucks, driversOf(state, m))) return;
   // homes already on a truck's route are covered — the next truck spreads to
   // whoever is left, so multiple trucks take distinct routes
   const covered = new Set();
