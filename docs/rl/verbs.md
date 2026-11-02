@@ -75,19 +75,28 @@ grows. The bypass signature confirmed — and the death-cause frontier moved
 from starvation to **understaffing** (the same reachability bottleneck, on
 the worker side). Checkpoint snapshot: `runs/genobs/courier_it335.pt`.
 
-## Why `shuttle` is verb #3
+## Why `shuttle` was verb #3 — and why it was retired
 
 Courier opened the food side of the reachability gap; the postmortem showed
 the frontier immediately shift to the worker side: understaffing deaths rose
 to ~39% while `mktStaffed` fell (0.68→0.62) — workers can't reach workplaces
-without roads either. `shuttle` is the exact analog: a paid walker escorts a
+without roads either. `shuttle` was the exact analog: a paid walker escorts a
 worker from a home to an understaffed/hot building cross-country, masked by
-the same rules commuters use (`understaffedFor`: farms take anyone,
-offices/markets take same-colour, workplaces must be running hot) plus a
-survive-the-walk check against the demand clock. Arrival calls `arrive()`
-with a stateless proxy agent — identical demand-relief/staff-push effects,
-no return commute. Same economics: 2 tiles per escort, cap 2 in flight per
-building, walk speed — a relief valve, not a road substitute.
+the same rules commuters use (farms take anyone, offices/markets same-colour,
+works must run hot) plus a survive-the-walk check vs the demand clock.
+
+**Verdict (it ~115, ~3400 eps): inert — retired.** ~92% adoption from
+iteration 1 (fastest ever — but adoption is an offer-rate artifact, not a
+value signal) with ~3.3 dispatches/ep and ~100% arrival success, yet the
+understaffed death share never bent (flat 30-37% for 115 iters). The
+mechanism lesson, now a design rule: **relief-valve verbs only pay when the
+per-dispatch buy is a *save*, not a *delay*** — courier buys ~120s of
+survival per feed; shuttle buys 24s of `demandT` relief and the meter
+refills. Sustaining one hot workplace costs ~5 tiles/min forever, and the
+hoped-for `shuttle→connect` bridge play never emerged. Worse, it
+cannibalized courier (2.3→1.8 disp/ep) — an inert verb taxing a working one.
+Retired via `RL_SHUTTLE` env gate (enum off by default; sim code kept).
+Checkpoint: `runs/genobs/shuttle_it115.pt`.
 
 ## Adding a verb (the checklist)
 

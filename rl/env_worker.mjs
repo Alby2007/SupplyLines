@@ -557,7 +557,10 @@ function enumerate(state) {
   // staffing-side analog of courier for buildings the road can't reach.
   // Masked to genuinely understaffed/hot buildings; the worker arrives as a
   // normal commute (demand relief / staff slot) at walk-speed economics.
-  {
+  // RETIRED (it ~115): ~92% adoption but understaffed deaths never bent —
+  // 24s relief per dispatch is a delay not a save, and it ate courier's
+  // tile budget. RL_SHUTTLE=1 re-enables.
+  if (SHUTTLE) {
     const cost = CONFIG.food.shuttleCost;
     if (state.roadTiles >= cost) {
       const sMeter = (b) => b.type === 'work' ? b.demandT / CONFIG.demand.limit
@@ -985,6 +988,9 @@ const FOODSHAPE = process.env.RL_FOODSHAPE !== '0';
 // verb sweeps without code edits — RL_COURIERR overrides courier radius (px)
 if (process.env.RL_COURIERR) CONFIG.food.courierRadius = +process.env.RL_COURIERR;
 if (process.env.RL_SHUTTLER) CONFIG.food.shuttleRadius = +process.env.RL_SHUTTLER;
+// verb retired (verdict: inert at relief-per-dispatch economics) — RL_SHUTTLE=1
+// re-enables enumeration for redesigns; the sim-side mechanics stay complete
+const SHUTTLE = process.env.RL_SHUTTLE === '1';
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated
