@@ -132,3 +132,28 @@ Falsifiable read (the experiment's whole point):
   (fix: shaping/capacity, the game is deep enough already)
 - branches push wk 10+ → visitation deficit (restore is the fix;
   max-week should climb as the archive self-advances)
+
+## RL_RESTORE verdict + verb #4 `reconnect` + difficulty rebalance
+
+Restore diagnostic RESOLVED at ~it 200 (2175 branches): extension-at-depth
+flat (+0.5wk) across ~1100 deep launches; launch-5 extension q-over-q
++0.69/+0.75/+0.71/+0.68; deep-branch death mix identical to fresh
+(starved 53%/understaffed 42%). Not OOD, not learnable-by-reps — a
+pressure-throughput equilibrium: simultaneous crises outscale the ~2
+useful actions/step + linear tile budget. Deep-branch act mix: noop→0%,
+line 62%, demolish 27% — fully subscribed treadmill of low-yield verbs.
+
+Verb #4 `reconnect` (slot 43): the stranded-component class connect's
+mask can't see — buildings ON a road yet service-disconnected (unassigned
+homes on market-less components; understaffed works on worker-less
+components). One action routes a Dijkstra to the *serving* component
+(market comps for homes, eligible-home comps for understaffed) —
+permanent fix, the only verb class that amortizes over crisis count.
+Verified live: cand offered → whole bridge built in one action → home
+assigned → cand gone. Gate: RL_RECONNECT=0.
+
+Difficulty rebalance ("pace" preset): intervalMin ×1.375 (8→11s),
+subdivision.every ×1.3 (130→169s), tilesPerWeek ×1.15 — slows the
+quadratic crisis growth, adds structural headroom. Env multipliers
+preserve per-level variation; autoplay --tune=path=*factor matches.
+Boundary: line 48834; pre-change ckpt restore_it290.pt.

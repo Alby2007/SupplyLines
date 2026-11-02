@@ -37,7 +37,7 @@ import * as readline from 'node:readline';
 import {
   srand, tick, served, blockedCells, mainComponentCells, pathToRoad,
   onLine, reachable, junctionPressure, newLine, cachedPlan,
-  decide, pickUpgrade,
+  decide, pickUpgrade, edgeComponents, componentCells,
 } from '../autoplay.mjs';
 
 const arg = (k, d) => {
@@ -59,8 +59,30 @@ function setLevel(lvl) {
     else CONFIG[k] = CONFIG_BASE[k];
   }
   applyLevelOverrides(lvl); // autoplay applies its own too — same level, harmless
+  applyRLTuning(); // difficulty multipliers ride on top of the level's own sections
+}
+
+// difficulty multipliers — applied AFTER level overrides so each map keeps
+// its relative structure (tilesPerWeek differs per level; a multiplier
+// preserves that spread where an absolute would flatten it). Baseline probes
+// reproduce the same shifts via autoplay --tune=path=*factor.
+const TUNERS = {
+  RL_SPAWNFLOOR: (v) => { CONFIG.spawn.intervalMin *= v; },
+  RL_TRACTEVERY: (v) => { CONFIG.subdivision.every *= v; },
+  RL_TILESWK: (v) => { CONFIG.roads.tilesPerWeek *= v; },
+  RL_DEMANDRATE: (v) => { CONFIG.demand.rate *= v; },
+  RL_HUNGERLIMIT: (v) => { CONFIG.food.hungerLimit *= v; },
+};
+function applyRLTuning() {
+  for (const [k, fn] of Object.entries(TUNERS)) if (process.env[k]) fn(+process.env[k]);
 }
 applyLevelOverrides(LEVELS[0]);
+applyRLTuning();
+if (process.env.RL_DEBUG) {
+  const tuned = Object.keys(TUNERS).filter((k) => process.env[k]);
+  console.error(`dbg tune: ${tuned.length ? tuned.map((k) => `${k}=${process.env[k]}`).join(' ') : 'none'} ` +
+    `| intervalMin ${CONFIG.spawn.intervalMin} tract ${CONFIG.subdivision?.every} tilesWk ${CONFIG.roads.tilesPerWeek}`);
+}
 
 // ---- dims -----------------------------------------------------------------
 const STEP = 1 / 60;
@@ -79,7 +101,7 @@ const CH = 25, GD = 37, AFD = 44, MAXA = 80; // afd slots 41-43 reserved for fut
 // type one-hots live at their slot index; 33/34 land in the tail that
 // upgrades (22..32) leave free, so checkpoints trained before demolition and
 // junctions existed still read every old action identically
-const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41, shuttle: 42 };
+const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41, shuttle: 42, reconnect: 43 };
 
 function meterOf(b) {
   if (b.type === 'work') return Math.max(0, b.demandT / CONFIG.demand.limit);
@@ -419,6 +441,79 @@ function enumerate(state) {
         dist: cells.length * CONFIG.grid.cell, alt: true },
       () => { if (buildRoad(state, cells).length) { state.roadTiles -= cost; return 0.15; } return 0; },
       `connect(alt) ${c.b.type}#${c.b.id}${c.b.active ? '' : ' (pending)'}`);
+  }
+
+  // reconnect: the class connect's mask can't see — buildings already on a
+  // road yet service-disconnected. Stranded-component homes starve
+  // unassigned while touching pavement; understaffed buildings on a
+  // component with no eligible worker source have no commute to give.
+  // Goal set is the component(s) that can actually serve them, so the
+  // Dijkstra draws the cheapest bridge between islands, not just to main.
+  if (RECONNECT && roadIdx.size) {
+    const { comp } = edgeComponents(state);
+    const compCache = new Map();
+    const cellsOfComp = (cid) => {
+      if (!compCache.has(cid)) compCache.set(cid, componentCells(roadIdx, comp, cid));
+      return compCache.get(cid);
+    };
+    const compOf = (b) => {
+      for (const c of buildingCells(b)) {
+        const refs = roadIdx.get(cellKey(c));
+        if (refs?.length) return comp.get(refs[0].edgeId) ?? null;
+      }
+      return null;
+    };
+    const goalInto = (goal, b, cid) => {
+      if (cid != null) for (const [k, v] of cellsOfComp(cid)) goal.set(k, v);
+      for (const c of buildingCells(b)) goal.set(cellKey(c), []); // unroaded target: land adjacent
+    };
+    const reconCands = [];
+    for (const b of state.buildings.values()) {
+      if (b.type === 'junction' || !b.active) continue;
+      const own = buildingCells(b);
+      if (!own.some((c) => roadIdx.has(cellKey(c)))) continue; // roadless is connect's job
+      const goalSet = new Map();
+      if (b.type === 'home') {
+        if (b.assignedMarket != null) continue;
+        for (const m of state.buildings.values()) {
+          if (m.type !== 'market' || !m.active || m.color !== b.color) continue;
+          goalInto(goalSet, m, compOf(m));
+        }
+      } else {
+        if (!understaffed(b)) continue;
+        const wantsWorker = (h) => h.type === 'home' && h.active &&
+          (b.type === 'farm' || h.color === b.color);
+        const myCid = compOf(b);
+        let stranded = myCid == null;
+        for (const h of state.buildings.values()) {
+          if (!wantsWorker(h)) continue;
+          const cid = compOf(h);
+          if (cid === myCid && myCid != null) { stranded = false; break; }
+          goalInto(goalSet, h, cid);
+        }
+        if (!stranded) continue; // reachable workers exist — gap isn't topology
+      }
+      if (!goalSet.size) continue;
+      const cells = cachedPlan(state, `recon:${b.id}`, () =>
+        pathToRoad(state, own, roadIdx, blocked, goalSet));
+      if (!cells || cells.length < 2) continue;
+      const cost = roadCellCost(state, cells);
+      if (cost > state.roadTiles) continue;
+      const wet = bridgeCost(state, cells);
+      if (wet > (state.bridges ?? 0)) continue;
+      reconCands.push({ b, cells, cost, wet, meter: meterOf(b) });
+    }
+    reconCands.sort((x, y) => y.meter - x.meter || x.cost - y.cost);
+    for (const c of reconCands.slice(0, 12)) {
+      const b = c.b;
+      push(
+        { type: 'reconnect', color: b.color,
+          costFrac: c.cost / Math.max(1, state.roadTiles), bridgeFrac: c.wet / 12,
+          meter: c.meter, wait: (b.waiting?.length ?? 0) / (b.capacity || 1),
+          dist: c.cells.length * CONFIG.grid.cell, rescue: b.type === 'home' },
+        () => { if (buildRoad(state, c.cells).length) { state.roadTiles -= c.cost; return 0.15; } return 0; },
+        `reconnect ${b.type}#${b.id}`);
+    }
   }
 
   for (const c of lineCandidates(state)) {
@@ -994,6 +1089,9 @@ const SHUTTLE = process.env.RL_SHUTTLE === '1';
 // RL_COURIER=0 suppresses courier enumeration — for evaluating pre-courier
 // checkpoints whose score head never trained on those candidates
 const COURIER = process.env.RL_COURIER !== '0';
+// RL_RECONNECT=0 suppresses reconnect (stranded-component bridging) for
+// ablation against checkpoints that never saw it
+const RECONNECT = process.env.RL_RECONNECT !== '0';
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated

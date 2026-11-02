@@ -54,7 +54,11 @@ for (const m of process.argv.filter((a) => a.startsWith('--tune='))) {
     const parts = path.split('.');
     let o = CONFIG;
     while (parts.length > 1) o = o[parts.shift()];
-    o[parts[0]] = JSON.parse(val);
+    // `path=*1.3` multiplies the current (post-level-override) value — the
+    // same semantics as the worker's RL_* difficulty multipliers, so bot
+    // baselines can be probed under identical difficulty
+    if (val.startsWith('*')) o[parts[0]] *= +val.slice(1);
+    else o[parts[0]] = JSON.parse(val);
   }
 }
 
@@ -1058,6 +1062,7 @@ export {
   junctionJoin, insertStop, newLine, onLine, avgDist, backboneWanted,
   reachable, tryLines, pickUpgrade, junctionPressure, tryShortcut,
   trySpecials, decide, postmortem, run, cachedPlan,
+  edgeComponents, componentCells,
 };
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
