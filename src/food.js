@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { spawnAgent, marketMatch } from './agents.js';
-import { spawnMilkTruck } from './vehicles.js';
+import { spawnMilkTruck, spawnCourier } from './vehicles.js';
 import { roadDistancesFrom } from './routing.js';
 
 export function update(state, dt) {
@@ -142,4 +142,40 @@ function hungryAssigned(state, mid) {
   }
   out.sort((a, b) => b.hungerT - a.hungerT);
   return out.map((h) => h.id);
+}
+
+// ---- couriers: the RL lever for homes no road can reach ---------------------
+// Eligible targets = same-colour homes with NO assigned market (assignedMarket
+// is null precisely when no same-colour market is road-reachable) inside the
+// courier's walking radius — trucks handle the rest. Hungriest first, nearer
+// breaking ties so a dispatch spends less time walking.
+export function courierTargets(state, m) {
+  const out = [];
+  for (const h of state.buildings.values()) {
+    if (h.type !== 'home' || !h.active || h.assignedMarket != null || h.color !== m.color) continue;
+    const d = Math.hypot(h.x - m.x, h.y - m.y);
+    if (d <= CONFIG.food.courierRadius) out.push({ h, d });
+  }
+  out.sort((a, b) => b.h.hungerT - a.h.hungerT || a.d - b.d);
+  return out;
+}
+
+export function couriersInFlight(state, mid) {
+  let n = 0;
+  for (const v of state.vehicles.values()) {
+    if (v.kind === 'courier' && v.market === mid) n++;
+  }
+  return n;
+}
+
+// one dispatch = one paid walker = one crate to one home. Consumes stock so
+// couriers stay downstream of the real chain; tiles are charged by the caller.
+export function sendCourier(state, m) {
+  if ((m.stock ?? 0) < 1) return null;
+  if (couriersInFlight(state, m.id) >= CONFIG.food.courierCap) return null;
+  const t = courierTargets(state, m)[0];
+  if (!t) return null;
+  const v = spawnCourier(state, m, t.h);
+  if (v) m.stock--;
+  return v;
 }

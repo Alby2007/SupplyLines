@@ -195,6 +195,9 @@ export const CONFIG = {
     assignInterval: 3,      // seconds between home→market reassignment
     hireCost: 4,            // road tiles per hired market driver (RL/action lever)
     hireLen: 180,           // seconds a hired driver works (one shift)
+    courierCost: 2,         // road tiles per courier dispatch (RL/action lever)
+    courierRadius: 480,     // px — 12 cells — a courier's one-way walking range
+    courierCap: 2,          // couriers in flight per market
   },
   buildings: { capacity: 6, radius: 13, homeRadius: 16, workRadius: 35, junctionRadius: 9 },
   junctions: {

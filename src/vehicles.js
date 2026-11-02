@@ -376,6 +376,39 @@ function milkArrive(state, v) {
   if (market) market.activeTrucks = Math.max(0, (market.activeTrucks || 0) - 1);
 }
 
+// ---- couriers: paid one-shot walkers carrying a crate cross-country ----
+// a straight-line edgeless seg — no road required — at walk speed. Delivers a
+// single feed then despawns; the relief valve for homes no road can reach.
+export function spawnCourier(state, market, home) {
+  const segs = segsForLeg(state, {
+    nodes: [`b${market.id}`, `b${home.id}`],
+    edgeIds: [null],
+  });
+  if (!segs.length) return null;
+  const v = {
+    id: nid(state),
+    kind: 'courier',
+    color: market.color ?? null,
+    segs,
+    seg: 0,
+    dist: 0,
+    market: market.id,
+    target: home.id,
+  };
+  state.vehicles.set(v.id, v);
+  return v;
+}
+
+function courierArrive(state, v) {
+  state.vehicles.delete(v.id);
+  const home = state.buildings.get(v.target);
+  if (home?.active) {
+    home.hungerT = 0;
+    home.fedAt = state.time;
+    state.courierFed = (state.courierFed || 0) + 1;
+  }
+}
+
 // ---- shared update ----
 
 export function update(state, dt) {
@@ -421,7 +454,7 @@ function yieldIndex(state) {
   for (const w of state.vehicles.values()) {
     // walkers cut across open ground — they don't occupy the junction box;
     // a dwelling bus is parked at its stop, not inside the junction either
-    if (w.kind === 'train' || w.kind === 'walker' || (w.kind === 'bus' && !w.segs)) continue;
+    if (w.kind === 'train' || w.kind === 'walker' || w.kind === 'courier' || (w.kind === 'bus' && !w.segs)) continue;
     const p = carPos(w);
     const k = `${Math.floor(p.x / B)}:${Math.floor(p.y / B)}`;
     let arr = idx.get(k);
@@ -436,7 +469,7 @@ function yieldIndex(state) {
 function updateRoadVeh(state, v, dt) {
   const seg = v.segs[v.seg];
   const e = seg?.edgeId != null ? state.roadEdges.get(seg.edgeId) : null;
-  const base = v.kind === 'walker' ? CONFIG.walk.speed
+  const base = v.kind === 'walker' || v.kind === 'courier' ? CONFIG.walk.speed
     : v.kind === 'car' ? CONFIG.roads.carSpeed : CONFIG.roads.truckSpeed;
   let d = base * (e ? congestFactor(state, e) : 1) * (e?.motorway ? CONFIG.motorways.speedFactor : 1) * dt;
 
@@ -517,6 +550,7 @@ function updateRoadVeh(state, v, dt) {
       v.seg++;
       if (v.seg >= v.segs.length) {
         if (v.kind === 'milkTruck') milkArrive(state, v);
+        else if (v.kind === 'courier') courierArrive(state, v);
         else if (v.kind === 'bus') busArrive(state, v);
         else arriveCar(state, v);
         return;

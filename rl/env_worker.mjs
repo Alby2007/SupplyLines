@@ -30,6 +30,7 @@ import {
 } from '../src/networks.js';
 import { roadDistancesFrom } from '../src/routing.js';
 import { addBusLine, carPos } from '../src/vehicles.js';
+import { courierTargets, couriersInFlight, sendCourier } from '../src/food.js';
 import { rushStatus } from '../src/economy.js';
 import { mapParams } from '../src/mapgen.js';
 import * as readline from 'node:readline';
@@ -78,7 +79,7 @@ const CH = 25, GD = 37, AFD = 44, MAXA = 80; // afd slots 41-43 reserved for fut
 // type one-hots live at their slot index; 33/34 land in the tail that
 // upgrades (22..32) leave free, so checkpoints trained before demolition and
 // junctions existed still read every old action identically
-const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40 };
+const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41 };
 
 function meterOf(b) {
   if (b.type === 'work') return Math.max(0, b.demandT / CONFIG.demand.limit);
@@ -513,6 +514,41 @@ function enumerate(state) {
             return 0.15;
           },
           `hire driver market#${m.id} (+${h.gap} driver gap)`);
+      }
+    }
+  }
+
+  // courier: paid walker carrying one crate cross-country to a hungry home no
+  // road can reach — the relief valve for the unassigned fraction. Costs
+  // tiles per delivery, so it's a scalpel beside roads, not a substitute.
+  {
+    const cost = CONFIG.food.courierCost;
+    if (state.roadTiles >= cost) {
+      const cands = [];
+      for (const m of state.buildings.values()) {
+        if (m.type !== 'market' || !m.active || (m.stock ?? 0) < 1) continue;
+        if (couriersInFlight(state, m.id) >= CONFIG.food.courierCap) continue;
+        const tgts = courierTargets(state, m);
+        if (!tgts.length) continue;
+        cands.push({ m, tgts });
+      }
+      cands.sort((a, b) => b.tgts[0].h.hungerT - a.tgts[0].h.hungerT);
+      for (const c of cands.slice(0, 6)) {
+        const m = c.m, top = c.tgts[0];
+        push(
+          { type: 'courier', color: m.color,
+            costFrac: cost / Math.max(1, state.roadTiles),
+            meter: top.h.hungerT / CONFIG.food.hungerLimit,
+            wait: couriersInFlight(state, m.id) / CONFIG.food.courierCap,
+            dist: top.d, stops: Math.min(8, c.tgts.length), rescue: 1 },
+          () => {
+            if (state.roadTiles < cost) return 0;
+            const v = sendCourier(state, m);
+            if (!v) return 0;
+            state.roadTiles -= cost;
+            return 0.15;
+          },
+          `courier market#${m.id} → home#${top.h.id} (${c.tgts.length} unreachable)`);
       }
     }
   }
@@ -1172,7 +1208,8 @@ function doStep(aIdx) {
     // unassigned homes can't be reached by any same-colour staffed market,
     // unstaffed farms make no crates, empty markets dispatch no trucks
     let homes = 0, hungry = 0, unassigned = 0, markets = 0, mktStaffed = 0,
-        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0, fleet = 0, hiredDrv = 0;
+        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0, fleet = 0, hiredDrv = 0,
+        couriersFly = 0;
     for (const b of state.buildings.values()) {
       if (!b.active) continue;
       if (b.type === 'home') {
@@ -1191,8 +1228,12 @@ function doStep(aIdx) {
         if (b.workers.length >= CONFIG.food.workersNeeded) farmStaffed++;
       }
     }
+    for (const v of state.vehicles.values()) {
+      if (v.kind === 'courier') couriersFly++;
+    }
     r.info.food = { homes, hungry, unassigned, markets, mktStaffed, mktStock,
-                    farms, farmStaffed, trucks, fleet, hiredDrv };
+                    farms, farmStaffed, trucks, fleet, hiredDrv,
+                    courierFed: state.courierFed || 0, couriersFly };
     r.info.upgrades = epUpgrades;
     r.info.upgradeOffers = epOffers;
   }
