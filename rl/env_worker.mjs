@@ -844,6 +844,10 @@ let state = null;
 let rng = null;
 let steps = 0;
 let prevExcess = 0; // worst meter pressure above the danger line — shaping
+let prevHungerP = 0; // food-specific pressure, tracked separately — see below
+
+// RL_FOODSHAPE=0 disables the food terms (A/B comparisons) without a code change
+const FOODSHAPE = process.env.RL_FOODSHAPE !== '0';
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated
@@ -865,8 +869,87 @@ function excessPressure(s) {
   return Math.max(0, m - 0.5);
 }
 
+// Food-specific pressure, kept out of the shared max(): there, hunger competes
+// with work-demand and overflow meters for a single slot, so its gradient only
+// arrives when a home is already the hottest thing on the map. Here the worst
+// home still anchors the term (first to 1.0 ends the run) but the mean makes
+// every hungry home contribute — feeding a merely-warm home pays too. The 0.4
+// threshold starts the gradient ~70s before the 120s limit, early enough that
+// a dispatched milkrun can still arrive in time.
+function hungerPressure(s) {
+  let worst = 0, sum = 0, n = 0;
+  for (const b of s.buildings.values()) {
+    if (!b.active || b.type !== 'home') continue;
+    const h = Math.max(0, b.hungerT / CONFIG.food.hungerLimit);
+    worst = Math.max(worst, h);
+    sum += h; n++;
+  }
+  return Math.max(0, worst - 0.4) + 0.25 * (n ? sum / n : 0);
+}
+
+// milkrun drops stamp home.fedAt = state.time; counting stamps inside the step
+// window gives the per-step delivery count — the one event that only fires
+// when the whole chain (farm→crate→market→truck→home) holds end to end
+function fedThisStep(s, tPrev) {
+  let n = 0;
+  for (const b of s.buildings.values()) {
+    if (b.type === 'home' && b.fedAt != null && b.fedAt > tPrev) n++;
+  }
+  return n;
+}
+
+// ---- state archive (Go-Explore-lite) ----------------------------------------
+// RL_RESTORE=p — probability that a reset restores an archived snapshot instead
+// of a cold/bot warm start. All game state lives inside `state` (id-referenced
+// data + a few matcher closures that only capture immutable scalars), so a
+// custom deep copy gives an exact restore — structuredClone would throw on the
+// agent `dest` functions, which we share by reference instead.
+const RESTORE = Math.min(1, Math.max(0, +process.env.RL_RESTORE || 0));
+const ARCHIVE_CAP = 48;
+const archive = [];   // { snap, week } — one entry per week boundary per worker
+let lastSnapWeek = 0;
+let epRestored = 0;   // week the current episode branched from (0 = fresh start)
+
+function deepClone(v) {
+  if (v instanceof Map) return new Map([...v].map(([k, x]) => [deepClone(k), deepClone(x)]));
+  if (v instanceof Set) return new Set([...v].map(deepClone));
+  if (Array.isArray(v)) return v.map(deepClone);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k in v) o[k] = deepClone(v[k]);
+    return o;
+  }
+  return v; // scalars and functions — shared by reference
+}
+
+// weight ∝ week: the frontier (deep states the policy rarely reaches) is what
+// the archive is for, but early states stay available for diversity
+function pickSnapshot() {
+  let sum = 0;
+  for (const s of archive) sum += s.week;
+  let r = Math.random() * sum;
+  for (const s of archive) { r -= s.week; if (r <= 0) return s; }
+  return archive[archive.length - 1];
+}
+
 function doReset(seed, warm = 0) {
   Math.random = srand(seed);
+  // restore branch: resume from a frontier snapshot instead of building a new
+  // world — the agent explores onward from states it actually reached. The
+  // stream keeps running off this seed, so each branch diverges on its own
+  // draws; `restored` is stamped on the episode record for analysis.
+  if (RESTORE > 0 && archive.length && Math.random() < RESTORE) {
+    const snap = pickSnapshot();
+    state = deepClone(snap.snap);
+    steps = 0;
+    epActs = {}; epTiles = 0; epBridges = 0;
+    epRestored = snap.week;
+    lastSnapWeek = state.week;
+    prevExcess = excessPressure(state);
+    prevHungerP = hungerPressure(state);
+    return respond(0, false);
+  }
+  epRestored = 0;
   state = createState();
   state.level = LEVEL;
   applyLevelFeatures(state);
@@ -890,6 +973,8 @@ function doReset(seed, warm = 0) {
   add('warm', sW);
   if (state.gameOver) return doReset(seed, 0); // bot died in warmup — cold retry
   prevExcess = excessPressure(state);
+  prevHungerP = hungerPressure(state);
+  lastSnapWeek = state.week;
   return respond(0, false);
 }
 
@@ -954,6 +1039,7 @@ function doStep(aIdx) {
     epBridges += br0 - (state.bridges ?? 0);
   }
   const d0 = state.delivered, f0 = state.freightDelivered;
+  const tPrev = state.time;
   const sT = t0();
   let t = 0, guard = 0;
   while (t < DECIDE_DT - 1e-9 && !state.gameOver && !state.upgradePending && guard++ < 240) {
@@ -966,6 +1052,20 @@ function doStep(aIdx) {
   const ex = excessPressure(state);
   reward += 2.0 * (prevExcess - ex); // meter-relief shaping
   prevExcess = ex;
+  if (FOODSHAPE) {
+    const hp = hungerPressure(state);
+    reward += 3.0 * (prevHungerP - hp);   // hunger relief pays more than the mixed meter
+    reward += 0.3 * fedThisStep(state, tPrev); // chain worked end-to-end
+    prevHungerP = hp;
+  }
+  // archive at each week boundary — one deep clone per env per week (~ms),
+  // bounded; when full a random slot is replaced so all eras stay represented
+  if (RESTORE > 0 && !state.gameOver && state.week !== lastSnapWeek) {
+    lastSnapWeek = state.week;
+    const entry = { snap: deepClone(state), week: state.week };
+    if (archive.length < ARCHIVE_CAP) archive.push(entry);
+    else archive[Math.floor(Math.random() * archive.length)] = entry;
+  }
   const done = !!state.gameOver || state.time >= MAX_SECONDS;
   // the game's actual objective as a terminal bonus — shaped meter relief
   // alone leaves the agent indifferent to crossing star thresholds
@@ -978,6 +1078,30 @@ function doStep(aIdx) {
     r.info.tilesSpent = epTiles;
     r.info.bridgesSpent = epBridges;
     r.info.lines = state.lines.size;
+    if (epRestored) r.info.restored = epRestored; // week the branch started from
+    // food-chain postmortem: which link was broken when the episode ended —
+    // unassigned homes can't be reached by any same-colour staffed market,
+    // unstaffed farms make no crates, empty markets dispatch no trucks
+    let homes = 0, hungry = 0, unassigned = 0, markets = 0, mktStaffed = 0,
+        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0;
+    for (const b of state.buildings.values()) {
+      if (!b.active) continue;
+      if (b.type === 'home') {
+        homes++;
+        if (b.hungerT > CONFIG.food.hungryAt) hungry++;
+        if (b.assignedMarket == null) unassigned++;
+      } else if (b.type === 'market') {
+        markets++;
+        mktStock += b.stock || 0;
+        if (b.workers.length > 0) mktStaffed++;
+        trucks += b.activeTrucks || 0;
+      } else if (b.type === 'farm') {
+        farms++;
+        if (b.workers.length >= CONFIG.food.workersNeeded) farmStaffed++;
+      }
+    }
+    r.info.food = { homes, hungry, unassigned, markets, mktStaffed, mktStock,
+                    farms, farmStaffed, trucks };
   }
   pending = r._acts;
   return r;
