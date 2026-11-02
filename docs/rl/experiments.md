@@ -115,3 +115,20 @@ Findings:
 Implication: the plateau is a play-quality ceiling, not a coverage or
 observability one. Next levers target depth: RL_RESTORE exploration,
 structural reachability verbs, or reward shaping — not more relief.
+
+## RL_RESTORE=0.3 — frontier-restore run (LAUNCHED, it 1)
+
+Held-out eval showed a uniform ~70-80%-of-bot play-quality ceiling with
+no generalization gap — a depth deficit, not a familiarity one. Restore
+(Go-Explore-lite, worker-side: 48-snap/week-boundary archive, drawn ∝
+week) restarts ~30% of episodes from states the run actually reached.
+Live-verified: 60/176 post-launch eps are branches (34% ≈ target),
+branch points wk 2-4 deepening as the archive fills; restored branches
+already extend +3-4wk past their launch week. Boundary: line 38847;
+pre-restore ckpt saved as postshuttle_it190.pt.
+
+Falsifiable read (the experiment's whole point):
+- branches die near their frontier → deep-game COMPETENCE deficit
+  (fix: shaping/capacity, the game is deep enough already)
+- branches push wk 10+ → visitation deficit (restore is the fix;
+  max-week should climb as the archive self-advances)
