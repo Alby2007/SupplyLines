@@ -60,3 +60,58 @@ survival); coverage plateau says the residual needs a lever. `hire` opens
 200→204). Prediction: `hiredDrv`>0 → activeTrucks/fleet↑ → starvation share
 bends on coverage-poor maps. The watch-item: will the policy *discover* the
 verb at ε=0.02 — or do new verbs need an exploration budget?
+
+## Verb #2: `courier` — NET POSITIVE (bypass signature confirmed)
+
+2-tile cross-country walker feeding one unassigned home. Retuned
+(radius 24, any-color, survive-the-walk) after geometry showed the
+tight mask reached ~15% of the target class. Adopted 10%→83% of eps,
+~3.7 dispatches/ep at ~100% delivery. Matched lift +0.6wk on feasible
+episodes, replicated ~9000 eps. Starvation share bent below 50% while
+un% rose (accumulation, not decay — surviving clients). Frontier moved
+to understaffing. Organic hire→courier tile reallocation observed.
+
+## Verb #3: `shuttle` worker escort — ADOPTED BUT INERT (retired)
+
+Worker-side courier analog: escort home→work, arrive() parity. 92-94%
+adoption from it 1 (inherited score prior), ~3.3 disp/ep. Target metric
+never moved: understaffed% flat 30-37% across 115 iters. Cause:
+relief-per-dispatch asymmetry — 1 courier feed ≈ 120s survival, 1
+escort ≈ 24s demandT delay. A save beats a delay. Cannibalized courier
+(2.26→1.78/ep). Retired via RL_SHUTTLE gate (impl preserved).
+Verdict: relief-valve verbs only work when the dispatch is a save.
+
+## Held-out eval — first non-training-mix measurement
+
+eval_sweep.py: 3 era ckpts × maps 1-3 + 7 held-out gen levels × 8 eps,
+greedy argmax, disjoint seeds. hire_it210 scored under RL_COURIER=0.
+
+  level   bot(med)  hire210  cour335  latest
+  L1        8        5.0      5.2      5.5
+  L2        8        5.6      6.0      6.4
+  L3        8        6.2      5.5      6.8
+  124 e     9        5.8      5.4      5.4
+  135       6        5.6      4.9      6.0
+  140       7        5.0      5.9      5.1
+  145       5        4.2      4.6      4.2
+  146       7        4.8      4.9      4.8
+  148       7        5.2      5.1      5.8
+  150       6        4.6      3.9      5.0
+  mean     ~7       5.20     5.14     5.50
+
+Findings:
+- NO generalization gap: held-out ≈ training-mix weeks (~5.2). The
+  policy generalizes; it does not memorize.
+- Uniform ~70-80% of bot on every map — a skill-ceiling gap, not a
+  map-familiarity gap. No ckpt reaches bot median anywhere.
+- eval_latest ≥ both eras (wins/ties 9/10 vs hire, 7/10 vs courier).
+  Verb-era training didn't hurt transfer; may have helped slightly.
+- Courier's training-mix lift did NOT translate to a clear held-out
+  advantage — era deltas are within noise at n=8. The verbs moved
+  death-cause mix, not the survival ceiling.
+- Held-out death mix ≈ training mix (starved ~50%, understaffed
+  ~25-30%); the bottleneck structure itself generalizes.
+
+Implication: the plateau is a play-quality ceiling, not a coverage or
+observability one. Next levers target depth: RL_RESTORE exploration,
+structural reachability verbs, or reward shaping — not more relief.
