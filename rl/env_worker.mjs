@@ -521,7 +521,7 @@ function enumerate(state) {
   // courier: paid walker carrying one crate cross-country to a hungry home no
   // road can reach — the relief valve for the unassigned fraction. Costs
   // tiles per delivery, so it's a scalpel beside roads, not a substitute.
-  {
+  if (COURIER) {
     const cost = CONFIG.food.courierCost;
     if (state.roadTiles >= cost) {
       const cands = [];
@@ -991,6 +991,9 @@ if (process.env.RL_SHUTTLER) CONFIG.food.shuttleRadius = +process.env.RL_SHUTTLE
 // verb retired (verdict: inert at relief-per-dispatch economics) — RL_SHUTTLE=1
 // re-enables enumeration for redesigns; the sim-side mechanics stay complete
 const SHUTTLE = process.env.RL_SHUTTLE === '1';
+// RL_COURIER=0 suppresses courier enumeration — for evaluating pre-courier
+// checkpoints whose score head never trained on those candidates
+const COURIER = process.env.RL_COURIER !== '0';
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated
