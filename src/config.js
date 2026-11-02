@@ -198,6 +198,9 @@ export const CONFIG = {
     courierCost: 2,         // road tiles per courier dispatch (RL/action lever)
     courierRadius: 960,     // px — 24 cells — a courier's one-way walking range
     courierCap: 2,          // couriers in flight per market
+    shuttleCost: 2,         // road tiles per worker escort (RL/action lever)
+    shuttleRadius: 960,     // px — 24 cells — max home→work walk
+    shuttleCap: 2,          // shuttles in flight per building
   },
   buildings: { capacity: 6, radius: 13, homeRadius: 16, workRadius: 35, junctionRadius: 9 },
   junctions: {

@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { spawnAgent, marketMatch } from './agents.js';
-import { spawnMilkTruck, spawnCourier } from './vehicles.js';
+import { spawnMilkTruck, spawnCourier, spawnShuttle } from './vehicles.js';
 import { roadDistancesFrom } from './routing.js';
 
 export function update(state, dt) {
@@ -180,4 +180,53 @@ export function sendCourier(state, m) {
   const v = spawnCourier(state, m, t.h);
   if (v) m.stock--;
   return v;
+}
+
+// ---- shuttles: the RL lever for workplaces no road can reach ----------------
+// Mirrors the commuter attraction rules (agents.js): farms take anyone,
+// offices/markets take same-colour workers, and only genuinely short/hot
+// buildings qualify — a shuttle to a healthy building is wasted tiles.
+export function understaffed(b) {
+  if (b.type === 'farm') return b.workers.length < CONFIG.food.workersNeeded;
+  if (b.type === 'market') return b.workers.length < Math.min(b.trucks, CONFIG.food.workersNeeded + 1);
+  if (b.type === 'work') return b.demandT > CONFIG.demand.limit * 0.4;
+  return false;
+}
+
+// homes a shuttle can pick a worker up from, nearest first
+export function shuttleSources(state, b) {
+  const out = [];
+  for (const h of state.buildings.values()) {
+    if (h.type !== 'home' || !h.active) continue;
+    if (b.type !== 'farm' && h.color !== b.color) continue; // offices/markets take own colour
+    const d = Math.hypot(h.x - b.x, h.y - b.y);
+    if (d <= CONFIG.food.shuttleRadius) out.push({ h, d });
+  }
+  out.sort((a, z) => a.d - z.d);
+  return out;
+}
+
+export function shuttlesInFlight(state, bid) {
+  let n = 0;
+  for (const v of state.vehicles.values()) {
+    if (v.kind === 'shuttle' && v.target === bid) n++;
+  }
+  return n;
+}
+
+// a hot workplace must still be alive when the walker arrives — same
+// survive-the-walk rule as couriers, against the demand clock this time.
+// Farms/markets don't die of their own gap, so any source in range works.
+function shuttleViable(state, b, d) {
+  if (b.type !== 'work') return true;
+  const rate = CONFIG.demand.rate * (1 + ((b.level ?? 1) - 1) * CONFIG.demand.growth);
+  return b.demandT + rate * (d / CONFIG.walk.speed) < CONFIG.demand.limit;
+}
+
+export function sendShuttle(state, b) {
+  if (!understaffed(b)) return null;
+  if (shuttlesInFlight(state, b.id) >= CONFIG.food.shuttleCap) return null;
+  const t = shuttleSources(state, b).find((s) => shuttleViable(state, b, s.d));
+  if (!t) return null;
+  return spawnShuttle(state, t.h, b);
 }

@@ -409,6 +409,39 @@ function courierArrive(state, v) {
   }
 }
 
+// ---- shuttles: paid one-shot walkers escorting a worker to a job -----------
+// home→work straight line at walk speed, no road needed; on arrival the
+// escorted worker counts exactly like a commuting one — arrive() applies the
+// building effects (demand relief + shift start / staff slot).
+export function spawnShuttle(state, home, work) {
+  const segs = segsForLeg(state, {
+    nodes: [`b${home.id}`, `b${work.id}`],
+    edgeIds: [null],
+  });
+  if (!segs.length) return null;
+  const v = {
+    id: nid(state),
+    kind: 'shuttle',
+    color: work.color ?? null,
+    segs,
+    seg: 0,
+    dist: 0,
+    target: work.id,
+  };
+  state.vehicles.set(v.id, v);
+  return v;
+}
+
+function shuttleArrive(state, v) {
+  state.vehicles.delete(v.id);
+  const b = state.buildings.get(v.target);
+  if (!b?.active) return;
+  state.shuttleArr = (state.shuttleArr || 0) + 1;
+  // the gig worker is a stateless proxy — arrive() applies the same demand
+  // relief / staff push as a real commute; nothing tracks it afterwards
+  arrive(state, { id: -v.id, kind: 'person', home: null }, v.target);
+}
+
 // ---- shared update ----
 
 export function update(state, dt) {
@@ -454,7 +487,7 @@ function yieldIndex(state) {
   for (const w of state.vehicles.values()) {
     // walkers cut across open ground — they don't occupy the junction box;
     // a dwelling bus is parked at its stop, not inside the junction either
-    if (w.kind === 'train' || w.kind === 'walker' || w.kind === 'courier' || (w.kind === 'bus' && !w.segs)) continue;
+    if (w.kind === 'train' || w.kind === 'walker' || w.kind === 'courier' || w.kind === 'shuttle' || (w.kind === 'bus' && !w.segs)) continue;
     const p = carPos(w);
     const k = `${Math.floor(p.x / B)}:${Math.floor(p.y / B)}`;
     let arr = idx.get(k);
@@ -469,7 +502,7 @@ function yieldIndex(state) {
 function updateRoadVeh(state, v, dt) {
   const seg = v.segs[v.seg];
   const e = seg?.edgeId != null ? state.roadEdges.get(seg.edgeId) : null;
-  const base = v.kind === 'walker' || v.kind === 'courier' ? CONFIG.walk.speed
+  const base = v.kind === 'walker' || v.kind === 'courier' || v.kind === 'shuttle' ? CONFIG.walk.speed
     : v.kind === 'car' ? CONFIG.roads.carSpeed : CONFIG.roads.truckSpeed;
   let d = base * (e ? congestFactor(state, e) : 1) * (e?.motorway ? CONFIG.motorways.speedFactor : 1) * dt;
 
@@ -551,6 +584,7 @@ function updateRoadVeh(state, v, dt) {
       if (v.seg >= v.segs.length) {
         if (v.kind === 'milkTruck') milkArrive(state, v);
         else if (v.kind === 'courier') courierArrive(state, v);
+        else if (v.kind === 'shuttle') shuttleArrive(state, v);
         else if (v.kind === 'bus') busArrive(state, v);
         else arriveCar(state, v);
         return;

@@ -30,7 +30,7 @@ import {
 } from '../src/networks.js';
 import { roadDistancesFrom } from '../src/routing.js';
 import { addBusLine, carPos } from '../src/vehicles.js';
-import { courierTargets, couriersInFlight, sendCourier } from '../src/food.js';
+import { courierTargets, couriersInFlight, sendCourier, understaffed, shuttleSources, shuttlesInFlight, sendShuttle } from '../src/food.js';
 import { rushStatus } from '../src/economy.js';
 import { mapParams } from '../src/mapgen.js';
 import * as readline from 'node:readline';
@@ -79,7 +79,7 @@ const CH = 25, GD = 37, AFD = 44, MAXA = 80; // afd slots 41-43 reserved for fut
 // type one-hots live at their slot index; 33/34 land in the tail that
 // upgrades (22..32) leave free, so checkpoints trained before demolition and
 // junctions existed still read every old action identically
-const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41 };
+const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41, shuttle: 42 };
 
 function meterOf(b) {
   if (b.type === 'work') return Math.max(0, b.demandT / CONFIG.demand.limit);
@@ -553,6 +553,45 @@ function enumerate(state) {
     }
   }
 
+  // shuttle: paid escort carrying a worker home→work cross-country — the
+  // staffing-side analog of courier for buildings the road can't reach.
+  // Masked to genuinely understaffed/hot buildings; the worker arrives as a
+  // normal commute (demand relief / staff slot) at walk-speed economics.
+  {
+    const cost = CONFIG.food.shuttleCost;
+    if (state.roadTiles >= cost) {
+      const sMeter = (b) => b.type === 'work' ? b.demandT / CONFIG.demand.limit
+        : 1 - b.workers.length / Math.max(1, b.type === 'farm' ? CONFIG.food.workersNeeded
+            : Math.min(b.trucks, CONFIG.food.workersNeeded + 1));
+      const cands = [];
+      for (const b of state.buildings.values()) {
+        if (b.type !== 'work' && b.type !== 'farm' && b.type !== 'market') continue;
+        if (!b.active || !understaffed(b)) continue;
+        if (shuttlesInFlight(state, b.id) >= CONFIG.food.shuttleCap) continue;
+        const srcs = shuttleSources(state, b);
+        if (!srcs.length) continue;
+        cands.push({ b, srcs, sm: sMeter(b) });
+      }
+      cands.sort((a, z) => z.sm - a.sm);
+      for (const c of cands.slice(0, 6)) {
+        const b = c.b, src = c.srcs[0];
+        push(
+          { type: 'shuttle', color: b.color,
+            costFrac: cost / Math.max(1, state.roadTiles),
+            meter: c.sm, wait: shuttlesInFlight(state, b.id) / CONFIG.food.shuttleCap,
+            dist: src.d, stops: Math.min(8, c.srcs.length), rescue: 1 },
+          () => {
+            if (state.roadTiles < cost) return 0;
+            const v = sendShuttle(state, b);
+            if (!v) return 0;
+            state.roadTiles -= cost;
+            return 0.15;
+          },
+          `shuttle worker → ${b.type}#${b.id} (${c.srcs.length} homes in range)`);
+      }
+    }
+  }
+
   // demolition: harvest dead spurs, cut jammed links, reclaim idle spans,
   // drop underused lines, sweep useless junctions — restructuring needs regret
   {
@@ -945,6 +984,7 @@ let prevHungerP = 0; // food-specific pressure, tracked separately — see below
 const FOODSHAPE = process.env.RL_FOODSHAPE !== '0';
 // verb sweeps without code edits — RL_COURIERR overrides courier radius (px)
 if (process.env.RL_COURIERR) CONFIG.food.courierRadius = +process.env.RL_COURIERR;
+if (process.env.RL_SHUTTLER) CONFIG.food.shuttleRadius = +process.env.RL_SHUTTLER;
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated
@@ -1211,7 +1251,7 @@ function doStep(aIdx) {
     // unstaffed farms make no crates, empty markets dispatch no trucks
     let homes = 0, hungry = 0, unassigned = 0, markets = 0, mktStaffed = 0,
         mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0, fleet = 0, hiredDrv = 0,
-        couriersFly = 0;
+        couriersFly = 0, shuttlesFly = 0;
     for (const b of state.buildings.values()) {
       if (!b.active) continue;
       if (b.type === 'home') {
@@ -1232,10 +1272,12 @@ function doStep(aIdx) {
     }
     for (const v of state.vehicles.values()) {
       if (v.kind === 'courier') couriersFly++;
+      else if (v.kind === 'shuttle') shuttlesFly++;
     }
     r.info.food = { homes, hungry, unassigned, markets, mktStaffed, mktStock,
                     farms, farmStaffed, trucks, fleet, hiredDrv,
-                    courierFed: state.courierFed || 0, couriersFly };
+                    courierFed: state.courierFed || 0, couriersFly,
+                    shuttleArr: state.shuttleArr || 0, shuttlesFly };
     r.info.upgrades = epUpgrades;
     r.info.upgradeOffers = epOffers;
   }

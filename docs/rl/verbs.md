@@ -1,6 +1,6 @@
 # The action vocabulary
 
-Up to 80 masked actions per decision across 13 verbs. `feat()` encodes each:
+Up to 80 masked actions per decision across 14 verbs. `feat()` encodes each:
 type one-hot, color, `costFrac`, `meter`, `wait`, `dist`, `stops`, `freight`,
 `rescue`, `bridgeFrac`, `upgradeIdx`, `alt`, `demo`, `bus`.
 
@@ -18,7 +18,8 @@ type one-hot, color, `costFrac`, `meter`, `wait`, `dist`, `stops`, `freight`,
 | `demolish` | remove spur/link/span/junction/line | `demo` subtype, tile refund |
 | `upgrade` | take a lottery offer (whole action space during `upgradePending`) | `upgradeIdx` one-hot |
 | **`hire`** | **pay `hireCost` tiles → +1 driver for `hireLen` s on a driver-gapped market** | color, costFrac, served-hunger meter, utilization |
-| **`courier`** | **pay `courierCost` tiles → walker carries 1 crate cross-country to an unreachable same-colour home** | color, costFrac, target-hunger meter, in-flight wait, dist, radius-targets stops, rescue=1 |
+| **`courier`** | **pay `courierCost` tiles → walker carries 1 crate cross-country to an unreachable home** | color, costFrac, target-hunger meter, in-flight wait, dist, radius-targets stops, rescue=1 |
+| **`shuttle`** | **pay `shuttleCost` tiles → walker escorts a worker home→work cross-country (demand relief / staff slot)** | color, costFrac, staffing meter, in-flight wait, dist, sources stops, rescue=1 |
 
 ## Why `hire` was verb #1
 
@@ -59,6 +60,34 @@ tiles/week income. Implemented via the existing walk-leg machinery (an
 to `milkArrive` so the delivery reward terms apply unchanged. Predicted
 signature if it works: starvation share falls *while* `unassignedFrac` stays
 high — the bypass signature, distinguishable from a coverage fix (both fall).
+
+**Verdict (it ~335, ongoing): net-positive — the first verb that works.**
+Adoption grew organically 10%→83% of episodes and 0.1→3.7 dispatches/ep
+(after a retune: radius 12→24 cells + colour-blind targeting — the v1 mask
+reached only ~15-25% of unassigned homes; a bot-replay probe measured the
+real gap geometry at ~21 cells median). Courier-using episodes outlive
+matched non-users by a stable +0.5-0.7wk for thousands of episodes, and the
+starvation death share fell below 50% for the first time — while
+`unassignedFrac` *rose* to ~0.40. That rise is accumulation, not decay:
+unreachable homes used to kill the episode ~120s after spawning; now they
+survive as courier-maintained clients, so the terminal uncovered population
+grows. The bypass signature confirmed — and the death-cause frontier moved
+from starvation to **understaffing** (the same reachability bottleneck, on
+the worker side). Checkpoint snapshot: `runs/genobs/courier_it335.pt`.
+
+## Why `shuttle` is verb #3
+
+Courier opened the food side of the reachability gap; the postmortem showed
+the frontier immediately shift to the worker side: understaffing deaths rose
+to ~39% while `mktStaffed` fell (0.68→0.62) — workers can't reach workplaces
+without roads either. `shuttle` is the exact analog: a paid walker escorts a
+worker from a home to an understaffed/hot building cross-country, masked by
+the same rules commuters use (`understaffedFor`: farms take anyone,
+offices/markets take same-colour, workplaces must be running hot) plus a
+survive-the-walk check against the demand clock. Arrival calls `arrive()`
+with a stateless proxy agent — identical demand-relief/staff-push effects,
+no return commute. Same economics: 2 tiles per escort, cap 2 in flight per
+building, walk speed — a relief valve, not a road substitute.
 
 ## Adding a verb (the checklist)
 
