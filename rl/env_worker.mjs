@@ -943,6 +943,8 @@ let prevHungerP = 0; // food-specific pressure, tracked separately — see below
 
 // RL_FOODSHAPE=0 disables the food terms (A/B comparisons) without a code change
 const FOODSHAPE = process.env.RL_FOODSHAPE !== '0';
+// verb sweeps without code edits — RL_COURIERR overrides courier radius (px)
+if (process.env.RL_COURIERR) CONFIG.food.courierRadius = +process.env.RL_COURIERR;
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated

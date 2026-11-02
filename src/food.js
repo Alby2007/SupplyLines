@@ -145,16 +145,18 @@ function hungryAssigned(state, mid) {
 }
 
 // ---- couriers: the RL lever for homes no road can reach ---------------------
-// Eligible targets = same-colour homes with NO assigned market (assignedMarket
-// is null precisely when no same-colour market is road-reachable) inside the
-// courier's walking radius — trucks handle the rest. Hungriest first, nearer
-// breaking ties so a dispatch spends less time walking.
+// Eligible targets = homes with NO assigned market inside the courier's
+// walking radius that can still be alive on arrival — trucks handle the
+// rest. Colour-blind: a paid walker isn't bound to a transit line the way a
+// market's truck routes are. Hungriest first, nearer breaking ties.
 export function courierTargets(state, m) {
   const out = [];
   for (const h of state.buildings.values()) {
-    if (h.type !== 'home' || !h.active || h.assignedMarket != null || h.color !== m.color) continue;
+    if (h.type !== 'home' || !h.active || h.assignedMarket != null) continue;
     const d = Math.hypot(h.x - m.x, h.y - m.y);
-    if (d <= CONFIG.food.courierRadius) out.push({ h, d });
+    if (d > CONFIG.food.courierRadius) continue;
+    if (h.hungerT + d / CONFIG.walk.speed >= CONFIG.food.hungerLimit) continue;
+    out.push({ h, d });
   }
   out.sort((a, b) => b.h.hungerT - a.h.hungerT || a.d - b.d);
   return out;
