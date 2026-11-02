@@ -1,3 +1,5 @@
+import { GEN_LEVELS } from './genlevels.js';
+
 export const CONFIG = {
   map: {
     width: 1600,            // world px — 40 cells wide
@@ -59,6 +61,7 @@ export const CONFIG = {
       // the river tax is real — softer star thresholds than the open maps
       win: { stars: [4, 7, 10] },
     },
+    ...GEN_LEVELS,     // generated suite — IDs 101+, emitted by src/genmaps.mjs
   },
   spawn: {
     intervalStart: 14,      // seconds between new buildings at week 1

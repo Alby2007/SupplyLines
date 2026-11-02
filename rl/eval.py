@@ -90,7 +90,10 @@ def main():
                 i = m['info']
                 results.append(dict(week=i['week'], time=i['time'],
                                     delivered=i['delivered'], freight=i['freight'],
-                                    reason=i['reason'], stars=stars(args.level, i['week']),
+                                    reason=i['reason'],
+                                    stars=i.get('stars', stars(i.get('level', args.level), i['week'])),
+                                    level=i.get('level'), mapp=i.get('mapp'),
+                                    food=i.get('food'),
                                     acts=i.get('acts'), tilesSpent=i.get('tilesSpent'),
                                     lines=i.get('lines')))
                 if si < len(seeds):

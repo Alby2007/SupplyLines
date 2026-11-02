@@ -22,7 +22,9 @@ def parse():
     p.add_argument('--envs', type=int, default=8)
     p.add_argument('--level', type=int, default=1)
     p.add_argument('--levels', type=str, default=None,
-                   help='comma list cycled across envs for mixed-map training, e.g. 1,1,2,3')
+                   help='comma list forming the per-episode level pool — each '
+                        'worker i.i.d.-samples a level per reset, e.g. 1,2,3 or '
+                        'a generated-map pool like 101,105,112')
     p.add_argument('--iters', type=int, default=300)
     p.add_argument('--tsteps', type=int, default=2048, help='rollout steps per iter')
     p.add_argument('--gamma', type=float, default=0.997)
@@ -43,6 +45,10 @@ def parse():
     p.add_argument('--tag', type=str, default='run')
     p.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     p.add_argument('--ckpt', type=str, default=None, help='resume from checkpoint')
+    p.add_argument('--transfer', action='store_true',
+                   help='load only shape-compatible keys from --ckpt — partial '
+                        'transfer across an obs/architecture change (e.g. the '
+                        'map-param globals), relearning mismatched layers')
     p.add_argument('--groups', type=int, default=2,
                    help='env groups for double-buffered rollouts (1 = no sim/GPU overlap)')
     p.add_argument('--cpu-buffer', action='store_true',
@@ -57,17 +63,29 @@ def main():
     run_dir = os.path.join(os.path.dirname(__file__), 'runs', args.tag)
     os.makedirs(run_dir, exist_ok=True)
 
-    levels = [int(x) for x in args.levels.split(',')] if args.levels else args.level
+    # --levels is a pool string passed straight to workers (i.i.d. per-episode
+    # levels); a bare --level int still fixes every worker to one map
+    levels = args.levels if args.levels else args.level
     env = VecEnv(args.envs, level=levels, base_seed=args.seed, warm=args.warmstart,
                  n_groups=args.groups)
     net = ActorCritic(ch=env.ch, gd=env.gd, afd=env.afd).to(dev)
-    if args.ckpt:
-        net.load_state_dict(torch.load(args.ckpt, map_location=dev))
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
+    # init lazy layers before loading: --transfer needs real shapes to
+    # filter keys, and strict loads initialize from the ckpt either way
     with torch.no_grad():
         dummy = torch.zeros(1, env.ch, env.rows, env.cols, device=dev)
         net(dummy, torch.zeros(1, env.gd, device=dev),
             torch.zeros(1, 1, env.afd, device=dev), torch.ones(1, 1, dtype=torch.bool, device=dev))
+    if args.ckpt:
+        sd = torch.load(args.ckpt, map_location=dev)
+        if args.transfer:
+            own = net.state_dict()
+            ok = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}
+            skipped = sorted(set(sd) - set(ok))
+            net.load_state_dict(ok, strict=False)
+            print(f'transfer: loaded {len(ok)}/{len(sd)} keys; skipped {skipped}')
+        else:
+            net.load_state_dict(sd)
+    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
 
     T, N = args.tsteps, args.envs
     shape_g = (T, N, env.ch, env.rows, env.cols)

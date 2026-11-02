@@ -31,6 +31,7 @@ import {
 import { roadDistancesFrom } from '../src/routing.js';
 import { addBusLine, carPos } from '../src/vehicles.js';
 import { rushStatus } from '../src/economy.js';
+import { mapParams } from '../src/mapgen.js';
 import * as readline from 'node:readline';
 import {
   srand, tick, served, blockedCells, mainComponentCells, pathToRoad,
@@ -42,8 +43,23 @@ const arg = (k, d) => {
   const m = process.argv.find((a) => a.startsWith(`--${k}=`));
   return m ? m.split('=')[1] : d;
 };
-const LEVEL = +arg('level', 1);
-applyLevelOverrides(LEVEL); // autoplay applies its own too — same level, harmless
+// --level accepts a pool ("101,105,112" or a single int): each reset samples
+// one uniformly so an episode's level is i.i.d. across the distribution
+const LEVELS = String(arg('level', 1)).split(',').map((s) => +s.trim());
+// overrides merge one-way onto CONFIG, so rotating levels needs a per-episode
+// restore or one map's sections bleed into the next. Snapshot taken after
+// config.js's GEN_LEVELS merge, so gen defs live in `levels` either way.
+const CONFIG_BASE = JSON.parse(JSON.stringify(CONFIG));
+function setLevel(lvl) {
+  for (const k of Object.keys(CONFIG)) {
+    if (!(k in CONFIG_BASE)) delete CONFIG[k];
+    else if (CONFIG[k] && typeof CONFIG[k] === 'object')
+      CONFIG[k] = JSON.parse(JSON.stringify(CONFIG_BASE[k]));
+    else CONFIG[k] = CONFIG_BASE[k];
+  }
+  applyLevelOverrides(lvl); // autoplay applies its own too — same level, harmless
+}
+applyLevelOverrides(LEVELS[0]);
 
 // ---- dims -----------------------------------------------------------------
 const STEP = 1 / 60;
@@ -55,7 +71,7 @@ const ROWS = Math.floor(CONFIG.map.height / CONFIG.grid.cell);
 // 40-wide grid lands in the left half and the level one-hot in globals tells
 // the policy which map it's on
 const OBSCOLS = Math.max(COLS, 80), OBSROWS = Math.max(ROWS, 32);
-const CH = 25, GD = 30, AFD = 40, MAXA = 80;
+const CH = 25, GD = 37, AFD = 40, MAXA = 80;
 
 // ---- action enumeration ---------------------------------------------------
 
@@ -321,6 +337,7 @@ function makeOffers(state) {
   while (offers.length < 2 && pool.length)
     offers.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
   if (!offers.length) { state.upgradePending = false; return null; }
+  epOffers.push(offers.map((u) => u.name)); // what the agent was shown
   return offers;
 }
 
@@ -337,7 +354,7 @@ function enumerate(state) {
     state._offers = offers;
     offers.forEach((u) => push(
       { type: 'upgrade', upgradeIdx: UPGRADES.indexOf(u) },
-      () => { u.apply(state); state.upgradePending = false; state._offers = null; return 0.05; },
+      () => { epUpgrades.push(u.name); u.apply(state); state.upgradePending = false; state._offers = null; return 0.05; },
       `upgrade:${u.name}`));
     return acts;
   }
@@ -804,7 +821,9 @@ function encodeObs(state) {
     state.agents.size / 200,
     state.vehicles.size / 120,
     [...state.buildings.values()].some((b) => b.type === 'farm' && b.active) ? 1 : 0,
-    LEVEL === 1 ? 1 : 0, LEVEL === 2 ? 1 : 0, LEVEL === 3 ? 1 : 0,
+    // the map's own parameters replace the one-hot — a policy trained on a
+    // distribution reads terrain/knobs as features instead of memorizing IDs
+    ...mapParams(state.level),
     state.upgradePending ? 1 : 0,
     capTot ? waitTot / capTot : 0,
     Math.min(1.5, maxMeter),
@@ -898,6 +917,22 @@ function fedThisStep(s, tPrev) {
   return n;
 }
 
+// driver-cap pressure — the diagnosed bottleneck: activeTrucks ≤ min(fleet,
+// workers) and drivers ARE market staff, so parked fleets mean unstaffed
+// markets. Fraction of the fleet that can't roll; a market gaining a worker
+// pays, one leaving costs. RL_DRIVERSHAPE=0 disables (A/B).
+const DRIVERSHAPE = process.env.RL_DRIVERSHAPE !== '0';
+let prevDriverP = 0;
+function driverPressure(s) {
+  let gap = 0, cap = 0;
+  for (const b of s.buildings.values()) {
+    if (!b.active || b.type !== 'market') continue;
+    cap += b.trucks;
+    gap += Math.max(0, Math.min(b.trucks, CONFIG.food.workersNeeded + 1) - b.workers.length);
+  }
+  return cap ? gap / cap : 0;
+}
+
 // ---- state archive (Go-Explore-lite) ----------------------------------------
 // RL_RESTORE=p — probability that a reset restores an archived snapshot instead
 // of a cold/bot warm start. All game state lives inside `state` (id-referenced
@@ -940,21 +975,25 @@ function doReset(seed, warm = 0) {
   // draws; `restored` is stamped on the episode record for analysis.
   if (RESTORE > 0 && archive.length && Math.random() < RESTORE) {
     const snap = pickSnapshot();
+    setLevel(snap.snap.level); // the episode continues on the snapshot's map
     state = deepClone(snap.snap);
     steps = 0;
-    epActs = {}; epTiles = 0; epBridges = 0;
+    epActs = {}; epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
     epRestored = snap.week;
     lastSnapWeek = state.week;
     prevExcess = excessPressure(state);
     prevHungerP = hungerPressure(state);
+    prevDriverP = driverPressure(state);
     return respond(0, false);
   }
   epRestored = 0;
+  const lvl = LEVELS[Math.floor(Math.random() * LEVELS.length)];
+  setLevel(lvl); // restore base sections, then this map's overrides
   state = createState();
-  state.level = LEVEL;
+  state.level = lvl;
   applyLevelFeatures(state);
   steps = 0;
-  epActs = {}; epTiles = 0; epBridges = 0;
+  epActs = {}; epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
   for (let i = 0; i < 30; i++) tick(state, STEP); // let the seed cluster open
   // reverse-curriculum warm start: the heuristic bot pre-plays a random
   // prefix so episodes reach the states runs actually die in — agent and
@@ -974,6 +1013,7 @@ function doReset(seed, warm = 0) {
   if (state.gameOver) return doReset(seed, 0); // bot died in warmup — cold retry
   prevExcess = excessPressure(state);
   prevHungerP = hungerPressure(state);
+  prevDriverP = driverPressure(state);
   lastSnapWeek = state.week;
   return respond(0, false);
 }
@@ -987,7 +1027,7 @@ function respond(reward, done) {
     delivered: state.delivered, freight: state.freightDelivered,
     buildings: state.buildings.size,
     reason: state.gameOver?.reason ?? null,
-    steps,
+    steps, level: state.level,
   };
   s = t0();
   const r = {
@@ -1025,7 +1065,7 @@ let pending = null; // acts from the last respond()
 
 // per-episode metrics — feed episodes.jsonl so the action histogram is a
 // visible collapse/emergence detector, not a guess
-let epActs = {}, epTiles = 0, epBridges = 0;
+let epActs = {}, epTiles = 0, epBridges = 0, epUpgrades = [], epOffers = [];
 
 function doStep(aIdx) {
   const acts = pending ?? enumerate(state);
@@ -1058,6 +1098,11 @@ function doStep(aIdx) {
     reward += 0.3 * fedThisStep(state, tPrev); // chain worked end-to-end
     prevHungerP = hp;
   }
+  if (DRIVERSHAPE) {
+    const dp = driverPressure(state);
+    reward += 1.5 * (prevDriverP - dp); // fleet kept manned pays
+    prevDriverP = dp;
+  }
   // archive at each week boundary — one deep clone per env per week (~ms),
   // bounded; when full a random slot is replaced so all eras stay represented
   if (RESTORE > 0 && !state.gameOver && state.week !== lastSnapWeek) {
@@ -1069,11 +1114,14 @@ function doStep(aIdx) {
   const done = !!state.gameOver || state.time >= MAX_SECONDS;
   // the game's actual objective as a terminal bonus — shaped meter relief
   // alone leaves the agent indifferent to crossing star thresholds
-  if (done) reward += (CONFIG.win?.stars ?? [5, 8, 11])
+  const stars = (CONFIG.win?.stars ?? [5, 8, 11])
     .filter((w) => state.week >= w).length;
+  if (done) reward += stars;
   if (state.gameOver) reward -= 2;
   const r = respond(reward, done);
   if (done) {
+    r.info.stars = stars;
+    r.info.mapp = mapParams(state.level).map((v) => +v.toFixed(4));
     r.info.acts = { ...epActs };
     r.info.tilesSpent = epTiles;
     r.info.bridgesSpent = epBridges;
@@ -1083,7 +1131,7 @@ function doStep(aIdx) {
     // unassigned homes can't be reached by any same-colour staffed market,
     // unstaffed farms make no crates, empty markets dispatch no trucks
     let homes = 0, hungry = 0, unassigned = 0, markets = 0, mktStaffed = 0,
-        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0;
+        mktStock = 0, farms = 0, farmStaffed = 0, trucks = 0, fleet = 0;
     for (const b of state.buildings.values()) {
       if (!b.active) continue;
       if (b.type === 'home') {
@@ -1093,6 +1141,7 @@ function doStep(aIdx) {
       } else if (b.type === 'market') {
         markets++;
         mktStock += b.stock || 0;
+        fleet += b.trucks || 0;
         if (b.workers.length > 0) mktStaffed++;
         trucks += b.activeTrucks || 0;
       } else if (b.type === 'farm') {
@@ -1101,7 +1150,9 @@ function doStep(aIdx) {
       }
     }
     r.info.food = { homes, hungry, unassigned, markets, mktStaffed, mktStock,
-                    farms, farmStaffed, trucks };
+                    farms, farmStaffed, trucks, fleet };
+    r.info.upgrades = epUpgrades;
+    r.info.upgradeOffers = epOffers;
   }
   pending = r._acts;
   return r;
