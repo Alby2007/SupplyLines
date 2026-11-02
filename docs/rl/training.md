@@ -26,6 +26,18 @@ python train.py --envs 8 --levels <pool> --iters 2000 --tsteps 2048 \
 Checkpoints: `rl/runs/<tag>/latest.pt` every iter; episodes stream to
 `rl/runs/<tag>/episodes.jsonl`.
 
+## Restarting a run (learned the hard way — twice)
+
+`nohup python train.py & echo $!` reports the **launcher** pid, not the
+trainer — the python process is `$!+1` (or find it: `pgrep -f "train.py.*cuda"`).
+Killing the launcher leaves the trainer alive: it keeps writing
+`latest.pt`/`episodes.jsonl` and silently forks the experiment into two
+interleaved runs (this happened twice — caught by out-of-order `it N`
+lines in the log and halved SPS). On restart: kill the **python** pid,
+verify `pgrep -f "train.py.*cuda"` is empty *and* `pgrep env_worker` drains
+(workers die on stdin EOF), snapshot `latest.pt` under a run-boundary name,
+then record `wc -l episodes.jsonl` as the boundary line.
+
 ## Model
 
 `ActorCritic`: 3× Conv(GemmConv) → LazyLinear(256) ‖ glob MLP(64) →
