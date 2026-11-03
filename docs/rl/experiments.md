@@ -214,3 +214,16 @@ Falsifiable read at ~it 100:
   under a reachable ceiling → fix capability before mechanics
 
 Boundary: line 62013; pre-calm ckpt commuter_it80.pt.
+
+## NaN checkpoint poisoning — incident + guards
+
+Calm launch hit a crash loop: giant policy-loss spikes (~4.6e9)
+overflowed the PPO ratio exp() to inf → NaN grads → NaN weights →
+saved into latest.pt → every resume died in ~12s. Supervisor correctly
+gave up after 5 fast crashes. Root cause chain found by scanning
+state_dicts for non-finite tensors.
+
+Guards added in train.py: log-ratio clamp ±20 (exp overflow), skip
+minibatches with non-finite loss or grad-norm (counted as `nskip`),
+refuse to save latest.pt when weights are non-finite, refuse to load
+a poisoned ckpt at startup. Recovered by restoring commuter_it80.pt.

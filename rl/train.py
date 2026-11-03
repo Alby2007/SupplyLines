@@ -77,6 +77,11 @@ def main():
             torch.zeros(1, 1, env.afd, device=dev), torch.ones(1, 1, dtype=torch.bool, device=dev))
     if args.ckpt:
         sd = torch.load(args.ckpt, map_location=dev)
+        bad = [k for k, v in sd.items()
+               if torch.is_tensor(v) and not v.isfinite().all()]
+        if bad:
+            raise SystemExit(f'ckpt {args.ckpt} has non-finite tensors '
+                             f'({len(bad)}: {bad[:3]}...) — restore a clean snapshot')
         if args.transfer:
             own = net.state_dict()
             ok, padded = {}, []
@@ -198,7 +203,7 @@ def main():
             return src[mb_t] if torch.is_tensor(src) else torch.as_tensor(src[mb_np], device=dev)
 
         pl = torch.zeros((), device=dev); vl = torch.zeros((), device=dev); el = torch.zeros((), device=dev)
-        nb = 0
+        nb = 0; nskip = 0
         for ep in range(args.epochs):
             np.random.shuffle(idx)
             idx_t = torch.as_tensor(idx, device=dev)
@@ -212,16 +217,21 @@ def main():
                 logits, v = net(g, gl, f, m)
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
                 logp = dist.log_prob(a)
-                ratio = (logp - take(slogp, mb, mb_t)).exp()
+                ld = (logp - take(slogp, mb, mb_t)).clamp(-20, 20)
+                ratio = ld.exp()
                 madv = take(sadv, mb, mb_t)
                 pg1, pg2 = -madv * ratio, -madv * ratio.clamp(1 - args.clip, 1 + args.clip)
                 ploss = torch.max(pg1, pg2).mean()
                 vloss = F.mse_loss(v, take(sret, mb, mb_t))
                 ent = dist.entropy().mean()
                 loss = ploss + args.vf * vloss - args.ent * ent
+                if not torch.isfinite(loss):
+                    opt.zero_grad(); nskip += 1; continue
                 opt.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+                gn = nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+                if not torch.isfinite(gn):
+                    opt.zero_grad(); nskip += 1; continue
                 opt.step()
                 pl += ploss.detach(); vl += vloss.detach(); el += ent.detach(); nb += 1
         pl, vl, el = pl.item(), vl.item(), el.item()   # one sync per iteration, not 3 per minibatch
@@ -244,7 +254,8 @@ def main():
             print(f'it {it:4d} | sps {sps:5d} | eps {len(ep_stats):4d} | warm {env.warm:5.0f}s | '
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
                   f'del {np.mean(dr) if dr else 0:.0f} | acts {astr} | '
-                  f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f}', flush=True)
+                  f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f}'
+                  + (f' nskip {nskip}' if nskip else ''), flush=True)
             # write ALL finished episodes — truncating to `recent` would drop
             # every episode beyond the last 30 in the window
             with open(os.path.join(run_dir, 'episodes.jsonl'), 'a') as fh:
@@ -252,9 +263,13 @@ def main():
                     fh.write(json.dumps(e) + '\n')
             ep_stats.clear()
         if it % 20 == 0:
-            torch.save(net.state_dict(), os.path.join(run_dir, 'latest.pt'))
+            if all(p.isfinite().all() for p in net.parameters()):
+                torch.save(net.state_dict(), os.path.join(run_dir, 'latest.pt'))
+            else:
+                print(f'it {it}: non-finite weights — latest.pt save skipped', flush=True)
 
-    torch.save(net.state_dict(), os.path.join(run_dir, 'latest.pt'))
+    if all(p.isfinite().all() for p in net.parameters()):
+        torch.save(net.state_dict(), os.path.join(run_dir, 'latest.pt'))
     env.close()
 
 
