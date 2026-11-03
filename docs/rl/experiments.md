@@ -239,7 +239,13 @@ trained scale; vf·vloss dominated the 0.5-norm clipped gradient and
 dragged the policy head into saturation. The pl spikes across ALL
 prior eras (up to 1.6e12) were early symptoms of the same scale bug.
 
-Fix: running-normalized value targets — per-batch ret mu/sd, v
-predicts z-scores, de-normalized at both GAE consumption points
-(b_val during rollout, nextv bootstrap). rsd logged for drift
-monitoring. Restarted from clean commuter_it80.pt.
+First fix (live per-batch normalizer) blew up exponentially —
+rsd 23→1.2e12 in 20 iters: de-normalizing v by a sigma measured
+from returns built from de-normalized v is a √T-gain feedback loop.
+
+Correct fix: FREEZE ret mu/sd at the first batch — a constant
+de-normalizer cannot amplify. Result: rsd pinned 25.3, vl 393→0.2,
+pl 7e5→0.004, ent 0.472 alive, weeks 8-9 and LEARNING (not coasting).
+v now predicts z-scored returns, de-normalized at both GAE
+consumption points (b_val during rollout, nextv bootstrap).
+Restarted from clean commuter_it80.pt.

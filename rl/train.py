@@ -124,7 +124,9 @@ def main():
     ep_stats = []
     t_start = time.time()
     step_total = 0
-    ret_mu, ret_sd = 0.0, 1.0  # return normalizer — v predicts z-scored returns
+    ret_mu, ret_sd, ret_init = 0.0, 1.0, False  # frozen at first batch —
+    # a live normalizer feeds back through the GAE bootstrap (v noise ∝ sd
+    # → ret noise ∝ sd → sd grows → exponential blowup, seen empirically)
 
     for it in range(1, args.iters + 1):
         net.eval()
@@ -188,7 +190,9 @@ def main():
         flogp = b_logp.ravel()
         fadv = adv.ravel()
         fret_raw = ret.ravel()
-        ret_mu, ret_sd = float(fret_raw.mean()), float(fret_raw.std()) + 1e-8
+        if not ret_init:
+            ret_mu, ret_sd, ret_init = (float(fret_raw.mean()),
+                                        float(fret_raw.std()) + 1e-8, True)
         fret = (fret_raw - ret_mu) / ret_sd
         fadv = (fadv - fadv.mean()) / (fadv.std() + 1e-8)
 
