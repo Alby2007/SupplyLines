@@ -59,3 +59,16 @@ minibatch-512 update; MIOpen's weight-grad solver segfaults on this GPU —
 | gen-map run (per-episode setLevel) | ~550-590 |
 
 The pipeline stays near that ceiling: per-episode `setLevel` costs ~ms.
+
+## Trainer watchdog — rl/supervise.sh
+
+train.py can die silently (GPU faults, OOM) and sit dead for hours.
+supervise.sh wraps the launch: relaunches on ANY exit, sleeps 30s after
+long runs, backs off linearly on <5min crashes, gives up after 5 fast
+crashes. Launch/exit history in runs/supervise.<tag>.log.
+
+  RL_*=… nohup ./supervise.sh genobs --envs 8 ... --ckpt runs/genobs/latest.pt &
+
+Verified: kill -TERM trainer → logged rc=143, relaunched in 60s, strict
+resume from latest.pt. The python pid is the supervisor's CHILD — kill
+the wrapper too when stopping deliberately (pkill -f supervise.sh).
