@@ -71,7 +71,11 @@ const TUNERS = {
   RL_TRACTEVERY: (v) => { CONFIG.subdivision.every *= v; },
   RL_TILESWK: (v) => { CONFIG.roads.tilesPerWeek *= v; },
   RL_DEMANDRATE: (v) => { CONFIG.demand.rate *= v; },
+  RL_DEMANDLIMIT: (v) => { CONFIG.demand.limit *= v; },
   RL_HUNGERLIMIT: (v) => { CONFIG.food.hungerLimit *= v; },
+  // worker supply rate: <1 shortens the per-home emission interval — tests
+  // whether understaffing is rate-bound (bends) or topological (flat)
+  RL_COMMUTER: (v) => { CONFIG.commuters.interval *= v; },
 };
 function applyRLTuning() {
   for (const [k, fn] of Object.entries(TUNERS)) if (process.env[k]) fn(+process.env[k]);
@@ -81,7 +85,7 @@ applyRLTuning();
 if (process.env.RL_DEBUG) {
   const tuned = Object.keys(TUNERS).filter((k) => process.env[k]);
   console.error(`dbg tune: ${tuned.length ? tuned.map((k) => `${k}=${process.env[k]}`).join(' ') : 'none'} ` +
-    `| intervalMin ${CONFIG.spawn.intervalMin} tract ${CONFIG.subdivision?.every} tilesWk ${CONFIG.roads.tilesPerWeek}`);
+    `| intervalMin ${CONFIG.spawn.intervalMin} tract ${CONFIG.subdivision?.every} tilesWk ${CONFIG.roads.tilesPerWeek} commuter ${CONFIG.commuters?.interval}`);
 }
 
 // ---- dims -----------------------------------------------------------------

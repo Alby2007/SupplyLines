@@ -157,3 +157,60 @@ subdivision.every ×1.3 (130→169s), tilesPerWeek ×1.15 — slows the
 quadratic crisis growth, adds structural headroom. Env multipliers
 preserve per-level variation; autoplay --tune=path=*factor matches.
 Boundary: line 48834; pre-change ckpt restore_it290.pt.
+
+## Era-end eval: reconpace_it205 (native pace + old-difficulty transfer)
+
+Held-out sweep, 10 levels × 8 eps, greedy argmax, bot re-baselined
+under identical tuning.
+
+- Native pace difficulty: mean 6.0wk vs bot ~7.5 (80%); bot-median
+  parity on 5/10 levels (L1, L3, 124, 140, 148) — first era with any
+  parity results. Residual gap concentrates on 145/146/150, all
+  understaffed-dominated deaths.
+- Old difficulty (pure transfer): mean 5.45 vs eval_latest 5.50 —
+  within noise. The +1.4wk training-mix lift was environment easing,
+  not capability growth. Reconnect's matched-subset lift (+0.9wk on
+  stranded states) is real but small in aggregate.
+- Reconnect adoption: ~22% of eps, retained through era end; users
+  outlive matched non-users by +0.3-0.9wk (self-selecting into harder
+  stranded states — conservative estimate).
+
+Conclusion: policy skill is ~flat on the original game; the agent can
+reach a ceiling when the game permits one, but cannot raise the
+ceiling itself.
+
+## Commuter-rate probe (RL_COMMUTER=0.75) — verdict
+
+~1800 eps: understaffed deaths 48% → 37-39% and stable across
+quartiles; weeks flat (~6.4). Confirms worker *supply rate* is a real
+causal bottleneck — but relief rotates into starvation (50%) rather
+than buying survival. Single-link fixes cannot lift the equilibrium:
+two links alternate as the binding constraint. The plateau is
+pressure-curve geometry, not missing vocabulary.
+
+Trainer killed by HSA_STATUS_ERROR_EXCEPTION at ~it 35 (GPU fault);
+rl/supervise.sh watchdog added — relaunches on any exit with
+backoff + crash-loop bound, verified by kill test. Boundary 60290;
+ckpt commuter_it80.pt.
+
+## Ceiling-climb: "calm" preset — the deep-regime experiment
+
+Question: is a learnable deep regime reachable by tuning, before
+building deeper mechanics? Bot calibration across 3 doses showed
+arrival-rate easing saturates via bottleneck rotation (median stuck
+~9-12). Winning dose adds severity-axis fuse length:
+
+  RL_SPAWNFLOOR=2 RL_TRACTEVERY=2 RL_TILESWK=1.5 RL_COMMUTER=0.7
+  RL_HUNGERLIMIT=1.4 RL_DEMANDLIMIT=1.4 RL_RESTORE=0.3
+
+Bot under calm: L1 med 11/max 14, L140 med 13/max 17, L150 med 10/max
+14 — deep regime exists (variance widened; tail reaches 14-17).
+New tuners: RL_DEMANDLIMIT, RL_HUNGERLIMIT, RL_COMMUTER.
+
+Falsifiable read at ~it 100:
+- agent max week climbs toward 14+ → deep competence exists →
+  prosperity-gated growth is justified as the next mechanic
+- agent plateaus ~8 while bot reaches 17 → policy-side deficit even
+  under a reachable ceiling → fix capability before mechanics
+
+Boundary: line 62013; pre-calm ckpt commuter_it80.pt.
