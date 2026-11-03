@@ -124,6 +124,7 @@ def main():
     ep_stats = []
     t_start = time.time()
     step_total = 0
+    ret_mu, ret_sd = 0.0, 1.0  # return normalizer — v predicts z-scored returns
 
     for it in range(1, args.iters + 1):
         net.eval()
@@ -149,7 +150,7 @@ def main():
                 if forced.any():
                     with torch.no_grad():
                         logp = dist.log_prob(torch.as_tensor(na, device=dev))
-            return na, logp.cpu().numpy(), v.cpu().numpy()
+            return na, logp.cpu().numpy(), (v * ret_sd + ret_mu).cpu().numpy()
 
         # steps are stored against the state they were taken FROM (s_t, a_t, r_t);
         # groups of envs overlap each other's sims with the policy forward
@@ -169,7 +170,7 @@ def main():
             _, nextv = net(g, gl, f, m)
         adv = np.zeros((T, N), np.float32)
         lastgae = np.zeros(N, np.float32)
-        nv = nextv.cpu().numpy()
+        nv = (nextv * ret_sd + ret_mu).cpu().numpy()
         for t in reversed(range(T)):
             nonterm = 1.0 - b_done[t].astype(np.float32)
             delta = b_rew[t] + args.gamma * nv * nonterm - b_val[t]
@@ -186,7 +187,9 @@ def main():
         fa = b_act.ravel()
         flogp = b_logp.ravel()
         fadv = adv.ravel()
-        fret = ret.ravel()
+        fret_raw = ret.ravel()
+        ret_mu, ret_sd = float(fret_raw.mean()), float(fret_raw.std()) + 1e-8
+        fret = (fret_raw - ret_mu) / ret_sd
         fadv = (fadv - fadv.mean()) / (fadv.std() + 1e-8)
 
         net.train()
@@ -254,7 +257,7 @@ def main():
             print(f'it {it:4d} | sps {sps:5d} | eps {len(ep_stats):4d} | warm {env.warm:5.0f}s | '
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
                   f'del {np.mean(dr) if dr else 0:.0f} | acts {astr} | '
-                  f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f}'
+                  f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f} rsd {ret_sd:.1f}'
                   + (f' nskip {nskip}' if nskip else ''), flush=True)
             # write ALL finished episodes — truncating to `recent` would drop
             # every episode beyond the last 30 in the window

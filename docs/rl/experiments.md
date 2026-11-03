@@ -227,3 +227,19 @@ Guards added in train.py: log-ratio clamp ±20 (exp overflow), skip
 minibatches with non-finite loss or grad-norm (counted as `nskip`),
 refuse to save latest.pt when weights are non-finite, refuse to load
 a poisoned ckpt at startup. Recovered by restoring commuter_it80.pt.
+
+## Value-head normalization — root cause of the entropy collapse
+
+Calm run diverged at ~it 15: vl exploded 2.4e6, ent collapsed to
+0.000, pl spikes ~7e5 — yet weeks held ~10.4 (policy coasting on
+old skill while learning died). Cause: advantages are z-normalized
+but RETURNS were regressed raw — the calm preset roughly doubled
+episode length, shifting the return distribution off the v-head's
+trained scale; vf·vloss dominated the 0.5-norm clipped gradient and
+dragged the policy head into saturation. The pl spikes across ALL
+prior eras (up to 1.6e12) were early symptoms of the same scale bug.
+
+Fix: running-normalized value targets — per-batch ret mu/sd, v
+predicts z-scores, de-normalized at both GAE consumption points
+(b_val during rollout, nextv bootstrap). rsd logged for drift
+monitoring. Restarted from clean commuter_it80.pt.
