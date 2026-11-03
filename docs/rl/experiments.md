@@ -276,3 +276,27 @@ upstream NaN sources); eps-greedy stores π logp not mixture logp
 (small IS bias at eps=0.02, standard practice); deepClone assumes
 plain-object state (fragile if classes ever enter game state);
 supervise relaunches clean exits too (intended keep-alive semantics).
+
+## Ceiling-climb VERDICT: deep competence exists (~95% bot parity under calm)
+
+calmfrozen_it480 held-out eval (10 levels × 8 eps, argmax, calm
+preset): mean 10.4wk, med-of-meds 11.2, cap-survivals on 6/10 levels.
+At/above calm-bot band on ~8/10; above on L1/L146/L150. Weak maps
+(135/140/145) are the usual starvation↔understaffing rotation, not a
+skill wall. vs eval_latest 5.50 (73%) and reconpace 6.00 (80%).
+
+Two caveats: (1) the checkpoint is entropy-saturated — it reached
+argmax strength partly via divergence-luck, not deliberate training;
+reproducible stable path to this strength unproven. (2) Calm env did
+heavy lifting — same policy class scores 5.45 native.
+
+Stable-trainer work landed along the way: KL early-stop (the missing
+canonical guard — caps per-iteration policy movement), frozen return
+normalizer, emb-detached critic, huber value loss, nskip/NaN-save/
+NaN-load guards. Together they converted explosion into erosion —
+the run diverges slowly now instead of dying.
+
+Design consequence: the agent exploits a deep regime when the game
+provides one — the sampled-vs-argmax gap (~3wk) hid most of its
+ability. Mechanics that raise the NATIVE ceiling (prosperity-gated
+growth, bounded threats) are now evidence-justified.
