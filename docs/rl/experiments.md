@@ -249,3 +249,30 @@ pl 7e5→0.004, ent 0.472 alive, weeks 8-9 and LEARNING (not coasting).
 v now predicts z-scored returns, de-normalized at both GAE
 consumption points (b_val during rollout, nextv bootstrap).
 Restarted from clean commuter_it80.pt.
+
+## Full-stack bug audit (post-NaN-incident sweep)
+
+Systematic read of train/rollout/model/vexp/env_worker/eval.
+
+Fixed:
+- enumerate() could return an EMPTY mask: upgradePending with zero
+  eligible upgrades early-returned [] — all-False mask → np.random.choice
+  crash on eps-forced picks (and uniform-over-invalid sampling on the
+  main path). Now falls through to normal enumeration.
+- np.empty → np.zeros in _pack/eval-pack: under-sent channels would
+  ship uninitialized host memory as obs.
+- eval.py now refuses non-finite checkpoints (parity with train.py).
+- eps-greedy guards empty masks at the consumer too (defense in depth).
+
+Verified correct: GAE done-mask/nextv/step alignment; mask -1e9 → exact
+0-prob sampling; v shape (B,) no broadcast; group/obs concat order;
+pending-acts↔feat index alignment; all pushed types in TYPE_IDX;
+--tune *factor ≡ worker RL_* multipliers; deterministic srand/reseed;
+noop last-slot guarantee (normal path always ≥1 act); obs canvas ≥ all
+pool maps (80×32 cap); supervise.sh backoff/bounds.
+
+Noted, deliberately kept: f16bits maps NaN→65504 (wire-safe but hides
+upstream NaN sources); eps-greedy stores π logp not mixture logp
+(small IS bias at eps=0.02, standard practice); deepClone assumes
+plain-object state (fragile if classes ever enter game state);
+supervise relaunches clean exits too (intended keep-alive semantics).

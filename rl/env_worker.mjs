@@ -377,13 +377,17 @@ function enumerate(state) {
 
   if (state.upgradePending) {
     const offers = state._offers ?? makeOffers(state);
-    if (!offers) return acts;
-    state._offers = offers;
-    offers.forEach((u) => push(
-      { type: 'upgrade', upgradeIdx: UPGRADES.indexOf(u) },
-      () => { epUpgrades.push(u.name); u.apply(state); state.upgradePending = false; state._offers = null; return 0.05; },
-      `upgrade:${u.name}`));
-    return acts;
+    if (offers) {
+      state._offers = offers;
+      offers.forEach((u) => push(
+        { type: 'upgrade', upgradeIdx: UPGRADES.indexOf(u) },
+        () => { epUpgrades.push(u.name); u.apply(state); state.upgradePending = false; state._offers = null; return 0.05; },
+        `upgrade:${u.name}`));
+      return acts;
+    }
+    // makeOffers cleared upgradePending (nothing eligible) — fall through to
+    // normal enumeration: an empty mask crashes eps-greedy upstream and
+    // turns the Categorical into a uniform draw over invalid slots
   }
 
   const roadIdx = roadCellIndex(state);

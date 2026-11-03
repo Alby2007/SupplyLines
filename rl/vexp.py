@@ -124,7 +124,7 @@ class VecEnv:
         ncells = self.rows * self.cols
         # grids/feats stay float16 on the host (the wire is f16 / 0-1, so this is
         # lossless) — callers widen on the GPU, halving host copies and PCIe bytes
-        grids = np.empty((len(msgs), self.ch, self.rows, self.cols), np.float16)
+        grids = np.zeros((len(msgs), self.ch, self.rows, self.cols), np.float16)
         globs = np.empty((len(msgs), self.gd), np.float32)
         feats = np.zeros((len(msgs), MAXA, self.afd), np.float16)
         mask = np.zeros((len(msgs), MAXA), np.bool_)

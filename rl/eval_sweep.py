@@ -50,21 +50,30 @@ def main():
     ap.add_argument('--envs', type=int, default=8)
     ap.add_argument('--seed', type=int, default=10000)
     ap.add_argument('--only', default='')
+    ap.add_argument('--ckpt', default='', help='single-ckpt mode: label=path')
+    ap.add_argument('--set', dest='env_extra', default='', help='extra worker env: K=V,K=V')
+    ap.add_argument('--out', default='runs/eval_heldout.json')
     args = ap.parse_args()
 
-    ckpts = CKPTS if not args.only else [c for c in CKPTS if c[0] == args.only]
+    env_extra = dict(kv.split('=', 1) for kv in args.env_extra.split(',') if kv)
+    if args.ckpt:
+        label, path = args.ckpt.split('=', 1)
+        ckpts = [(label, path, env_extra)]
+    else:
+        ckpts = CKPTS if not args.only else [c for c in CKPTS if c[0] == args.only]
     results = {}
-    for label, ckpt, env_extra in ckpts:
+    for label, ckpt, env in ckpts:
+        merged_env = {**env_extra, **env}
         results[label] = {}
         for lv in LEVELS:
-            r = run_eval(ckpt, lv, args.episodes, args.envs, args.seed, env_extra)
+            r = run_eval(ckpt, lv, args.episodes, args.envs, args.seed, merged_env)
             results[label][lv] = r
             med = r.get('weeks_med')
             print(f'{label:>14} L{lv:<4} wk med {med} mean {r.get("weeks_mean")} '
                   f'| deaths {r.get("deaths") or r.get("error", "")[:80]}', flush=True)
-        with open('runs/eval_heldout.json', 'w') as f:
+        with open(args.out, 'w') as f:
             json.dump(results, f, indent=1)
-    print('\nwrote runs/eval_heldout.json')
+    print(f'\nwrote {args.out}')
 
 
 if __name__ == '__main__':

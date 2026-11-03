@@ -148,7 +148,8 @@ def main():
             if cur_eps > 0:  # epsilon-greedy: uniform over the valid mask
                 forced = np.random.rand(len(na)) < cur_eps
                 for i in np.flatnonzero(forced):
-                    na[i] = np.random.choice(np.flatnonzero(o['mask'][i]))
+                    valid = np.flatnonzero(o['mask'][i])
+                    if len(valid): na[i] = np.random.choice(valid)
                 if forced.any():
                     with torch.no_grad():
                         logp = dist.log_prob(torch.as_tensor(na, device=dev))

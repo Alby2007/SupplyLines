@@ -20,7 +20,7 @@ def pack(msgs, w0):
     # same wire format as VecEnv._pack: bitpacked binary channels + f16 rest;
     # bin/con channel split derived from buffer sizes
     ncells = w0.rows * w0.cols
-    grids = np.empty((len(msgs), w0.ch, w0.rows, w0.cols), np.float32)
+    grids = np.zeros((len(msgs), w0.ch, w0.rows, w0.cols), np.float32)
     globs = np.array([m['obs']['glob'] for m in msgs], np.float32)
     feats = np.zeros((len(msgs), MAXA, w0.afd), np.float32)
     mask = np.zeros((len(msgs), MAXA), np.bool_)
@@ -55,7 +55,11 @@ def main():
     workers = [EnvWorker(args.level) for _ in range(args.envs)]
     w0 = workers[0]
     net = ActorCritic(ch=w0.ch, gd=w0.gd, afd=w0.afd).to(dev)
-    net.load_state_dict(torch.load(args.ckpt, map_location=dev))
+    sd = torch.load(args.ckpt, map_location=dev)
+    bad = [k for k, v in sd.items() if torch.is_tensor(v) and not v.isfinite().all()]
+    if bad:
+        raise SystemExit(f'ckpt {args.ckpt} has non-finite tensors ({len(bad)})')
+    net.load_state_dict(sd)
     net.eval()
 
     seeds = [args.seed + i for i in range(args.episodes)]
