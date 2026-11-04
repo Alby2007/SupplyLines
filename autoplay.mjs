@@ -635,14 +635,23 @@ function tryBus(state, log) {
   }
 }
 
-// what the player would pick from a two-offer weekly choice
-function pickUpgrade(state, log, rng = Math.random) {
-  const valid = UPGRADES.filter((u) => u.ok(state));
-  const offers = [];
-  while (offers.length < 2 && valid.length) {
-    offers.push(valid.splice(Math.floor(rng() * valid.length), 1)[0]);
+// what the player would pick from a two-offer weekly choice.
+// `preset` (optional): an already-dealt offer pair — callers that materialize
+// the deal elsewhere (e.g. the RL enum) pass it in so the bot scores the same
+// two options instead of rolling a fresh deal.
+function pickUpgrade(state, log, rng = Math.random, preset = null) {
+  const offers = preset ? [...preset] : [];
+  if (!preset) {
+    const valid = UPGRADES.filter((u) => u.ok(state));
+    while (offers.length < 2 && valid.length) {
+      offers.push(valid.splice(Math.floor(rng() * valid.length), 1)[0]);
+    }
   }
-  if (!offers.length) { state.upgradePending = false; return; }
+  if (!offers.length) {
+    state.upgradePending = false;
+    state._offers = null; // consumed — a stale pair re-deals itself every week
+    return;
+  }
   const homesHungry = [...state.buildings.values()].some(
     (b) => b.type === 'home' && b.hungerT > CONFIG.food.hungryAt);
   const overflowing = [...state.buildings.values()].some(
@@ -678,6 +687,9 @@ function pickUpgrade(state, log, rng = Math.random) {
   offers.sort((a, b) => score(b) - score(a));
   offers[0].apply(state);
   state.upgradePending = false;
+  state._offers = null; // consumed — callers that stashed the deal (the RL
+                        // enum, bcstep) must see a fresh pair next pending,
+                        // and stale offers bypass the ok() filter entirely
   log(`upgrade: "${offers[0].name}" over "${offers[1]?.name ?? '—'}"`);
 }
 
