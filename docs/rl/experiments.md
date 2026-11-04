@@ -430,3 +430,40 @@ RL 11.3 ≈ bot 11.25** (bot_eval.json / eval_bc_heldout.json)
 - Caveat: the post-fix bot is ~+2wk stronger than the artifact-era
   baseline (mergeable-goal repair) — historical RL numbers compared to a
   nerfed bot. The bar moved; future baselines use this bot_eval table.
+
+## T3 held-out verdict (t3_it715): complementary profile, owns the staffing maps
+
+Saturated ~it 715 (ent→0.015, same freeze pattern), banked then evaluated
+on the same suite (8 eps/level, calm+T1, argmax). Run log caveat: this
+lineage trained under pre-GAE-bootstrap and pre-mask-feasibility code —
+its ceiling is understated vs what the fixed trainer would produce.
+
+| level | bot | BC | T1 | **T3** |
+|---|---|---|---|---|
+| L1 | 10/10.2 | 13/12.5 | 14/13.5 | 12/10.2 |
+| L2 | 11/11.5 | 10/10.5 | 9/9.2 | **15/12.1** (3 surv) |
+| L3 | 14/13.4 | 12/11.8 | 12/11.6 | 5/5.1 |
+| L124 | 10/10.0 | 13/13.0 | 15/13.6 | 9/10.1 |
+| L135 | 10/10.2 | 11/11.4 | 10/10.4 | **12/10.4** |
+| L140 | 10/11.1 | 15/13.4 | 14/11.9 | 13/11.4 |
+| L145 | 12/12.8 | 12/11.0 | 9/8.4 | **11/10.8** (1 surv) |
+| L146 | 10/10.6 | 10/10.5 | 15/11.6 | **15/13.5** (4 surv) |
+| L148 | 10/11.1 | 13/12.5 | 15/13.0 | **15/12.5** (5 surv) |
+| L150 | 12/11.6 | 13/11.1 | 10/10.0 | 12/9.5 |
+
+Aggregate: med-of-meds **T1 13 > T3 12 = BC 12.5-ish > bot 10.5**;
+mean-of-means BC 11.8 > T1 11.3 > T3 10.6 ≈ bot 11.25; cap-survivals
+T1 19 · T3 15 (on 6 levels) · BC ~9.
+
+**Reading:**
+- T3's wins land on the staffing-heavy maps it was designed for —
+  **L145 11/10.8 vs T1's 9/8.4** (first RL artifact to survive there),
+  L135 +2, L148 med-15 with 5 survivals (best-in-table).
+- Losses are L3 (collapsed to 5 — worst cell of any policy) and L124.
+  Net-vs-T1: 4 wins, 3 losses, 3 ties on median.
+- Densify's lever shows up exactly where predicted: fewer understaffed
+  deaths on 145/148, more cap survivals. The verb works — the policy
+  built around it just hasn't fully caught up (82% ep adoption, ~2/ep).
+- Cross-policy view: **no single policy dominates.** T1 takes the
+  freight-band maps, T3 the staffing-band maps, BC the heuristic's home
+  turf — the suite now discriminates *strategy families*, not just scores.
