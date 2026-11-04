@@ -51,6 +51,7 @@ const LEVELS = String(arg('level', 1)).split(',').map((s) => +s.trim());
 // restore or one map's sections bleed into the next. Snapshot taken after
 // config.js's GEN_LEVELS merge, so gen defs live in `levels` either way.
 const CONFIG_BASE = JSON.parse(JSON.stringify(CONFIG));
+let dbgPrinted = false;
 function setLevel(lvl) {
   for (const k of Object.keys(CONFIG)) {
     if (!(k in CONFIG_BASE)) delete CONFIG[k];
@@ -60,6 +61,14 @@ function setLevel(lvl) {
   }
   applyLevelOverrides(lvl); // autoplay applies its own too — same level, harmless
   applyRLTuning(); // difficulty multipliers ride on top of the level's own sections
+  // RL_DEBUG prints once, from inside setLevel — what episodes actually get
+  // after the base restore (post-init dumps would miss tuner-table bugs)
+  if (process.env.RL_DEBUG && !dbgPrinted) {
+    dbgPrinted = true;
+    const tuned = Object.keys(TUNERS).filter((k) => process.env[k]);
+    console.error(`dbg tune: ${tuned.length ? tuned.map((k) => `${k}=${process.env[k]}`).join(' ') : 'none'} ` +
+      `| intervalMin ${CONFIG.spawn.intervalMin} tract ${CONFIG.subdivision?.every} tilesWk ${CONFIG.roads.tilesPerWeek} commuter ${CONFIG.commuters?.interval} courR ${CONFIG.food.courierRadius} shutR ${CONFIG.food.shuttleRadius}`);
+  }
 }
 
 // difficulty multipliers — applied AFTER level overrides so each map keeps
@@ -76,17 +85,17 @@ const TUNERS = {
   // worker supply rate: <1 shortens the per-home emission interval — tests
   // whether understaffing is rate-bound (bends) or topological (flat)
   RL_COMMUTER: (v) => { CONFIG.commuters.interval *= v; },
+  // verb-sweep knobs — absolute px overrides, not multipliers. They must live
+  // here: setLevel restores every section from CONFIG_BASE each reset, so any
+  // direct CONFIG assignment made after the base snapshot gets wiped
+  RL_COURIERR: (v) => { CONFIG.food.courierRadius = v; },
+  RL_SHUTTLER: (v) => { CONFIG.food.shuttleRadius = v; },
 };
 function applyRLTuning() {
   for (const [k, fn] of Object.entries(TUNERS)) if (process.env[k]) fn(+process.env[k]);
 }
 applyLevelOverrides(LEVELS[0]);
 applyRLTuning();
-if (process.env.RL_DEBUG) {
-  const tuned = Object.keys(TUNERS).filter((k) => process.env[k]);
-  console.error(`dbg tune: ${tuned.length ? tuned.map((k) => `${k}=${process.env[k]}`).join(' ') : 'none'} ` +
-    `| intervalMin ${CONFIG.spawn.intervalMin} tract ${CONFIG.subdivision?.every} tilesWk ${CONFIG.roads.tilesPerWeek} commuter ${CONFIG.commuters?.interval}`);
-}
 
 // ---- dims -----------------------------------------------------------------
 const STEP = 1 / 60;
@@ -1135,9 +1144,6 @@ let prevHungerP = 0; // food-specific pressure, tracked separately — see below
 
 // RL_FOODSHAPE=0 disables the food terms (A/B comparisons) without a code change
 const FOODSHAPE = process.env.RL_FOODSHAPE !== '0';
-// verb sweeps without code edits — RL_COURIERR overrides courier radius (px)
-if (process.env.RL_COURIERR) CONFIG.food.courierRadius = +process.env.RL_COURIERR;
-if (process.env.RL_SHUTTLER) CONFIG.food.shuttleRadius = +process.env.RL_SHUTTLER;
 // verb retired (verdict: inert at relief-per-dispatch economics) — RL_SHUTTLE=1
 // re-enables enumeration for redesigns; the sim-side mechanics stay complete
 const SHUTTLE = process.env.RL_SHUTTLE === '1';
