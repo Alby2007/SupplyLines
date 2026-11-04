@@ -41,6 +41,16 @@ def parse():
                    help='max seconds of bot pre-play per episode at iter 1')
     p.add_argument('--warmdecay', type=float, default=1.0, help='per-iter decay on warmstart')
     p.add_argument('--vf', type=float, default=0.5)
+    p.add_argument('--vtgt', choices=['gae', 'mc'], default='gae',
+                   help="value targets: 'gae' = adv+V (self-coupled — the "
+                        "co-drift channel); 'mc' = reward-to-go, V only at "
+                        "truncation bootstraps")
+    p.add_argument('--retnorm', choices=['freeze', 'roll'], default='freeze',
+                   help="'roll' re-normalizes returns each batch — safe only "
+                        'with --vtgt mc (V-free targets can\'t feed back)')
+    p.add_argument('--vanchor', type=float, default=0.0,
+                   help='if >0, adds λ·v² to the value loss — restoring force '
+                        'on the head\'s offset drift direction')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--tag', type=str, default='run')
     p.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
@@ -203,6 +213,20 @@ def main():
             adv[t] = lastgae
             nv = b_val[t]
         ret = adv + b_val
+        if args.vtgt == 'mc':
+            # reward-to-go targets: the critic's own V leaves the label, so a
+            # drifting value head can't drag its targets along — the co-drift
+            # channel that walked v to −500σ in normalized units while vl
+            # read ~35 (targets = adv + own-v track any uniform offset; only
+            # terminal states anchor, and they're sparse). V survives only as
+            # the tval bootstrap at cap-hits. Policy adv stays standard GAE.
+            retm = np.zeros((T, N), np.float32)
+            nxt = nv  # same rollout-boundary bootstrap GAE uses
+            for t in reversed(range(T)):
+                nxt = b_rew[t] + args.gamma * (nxt * (1.0 - b_done[t])
+                                               + b_tval[t] * b_trunc[t])
+                retm[t] = nxt
+            ret = retm
 
         # flatten batch dims
         fg = b_grid.reshape(T * N, env.ch, env.rows, env.cols)
@@ -213,7 +237,9 @@ def main():
         flogp = b_logp.ravel()
         fadv = adv.ravel()
         fret_raw = ret.ravel()
-        if not ret_init:
+        if not ret_init or args.retnorm == 'roll':
+            # roll: safe once targets are V-free (mc) — the original σ feedback
+            # loop needed a V-coupled label to run away
             ret_mu, ret_sd, ret_init = (float(fret_raw.mean()),
                                         float(fret_raw.std()) + 1e-8, True)
         fret = (fret_raw - ret_mu) / ret_sd
@@ -233,6 +259,7 @@ def main():
             return src[mb_t] if torch.is_tensor(src) else torch.as_tensor(src[mb_np], device=dev)
 
         pl = torch.zeros((), device=dev); vl = torch.zeros((), device=dev); el = torch.zeros((), device=dev)
+        vmu = torch.zeros((), device=dev)  # mean raw v — early drift detector
         nb = 0; nskip = 0; klstop = 0
         for ep in range(args.epochs):
             if klstop: break
@@ -255,6 +282,12 @@ def main():
                 pg1, pg2 = -madv * ratio, -madv * ratio.clamp(1 - args.clip, 1 + args.clip)
                 ploss = torch.max(pg1, pg2).mean()
                 vloss = F.smooth_l1_loss(v, take(sret, mb, mb_t))
+                if args.vanchor:
+                    # restoring force on the value head's offset direction —
+                    # near-free drift channel under gae targets, insurance
+                    # even under mc
+                    vloss = vloss + args.vanchor * (v ** 2).mean()
+                vmu += v.detach().mean()
                 ent = dist.entropy().mean()
                 loss = ploss + args.vf * vloss - args.ent * ent
                 if not torch.isfinite(loss):
@@ -294,7 +327,8 @@ def main():
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
                   f'del {np.mean(dr) if dr else 0:.0f} | tr {np.mean(tr) if tr else 0:.0%} | '
                   f'acts {astr} | '
-                  f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f} rsd {ret_sd:.1f}'
+                  f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f} '
+                  f'rsd {ret_sd:.1f} vμ {vmu.item()/max(nb,1):.2f}'
                   + (f' nskip {nskip}' if nskip else '')
                   + (' klstop' if klstop else ''), flush=True)
             # write ALL finished episodes — truncating to `recent` would drop
