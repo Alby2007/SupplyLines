@@ -23,8 +23,9 @@ python train.py --envs 8 --levels <pool> --iters 2000 --tsteps 2048 \
   is copied, new columns start fresh — e.g. `score.0 (96,200)->(96,204)`
   when `afd` grew for the hire verb)
 
-Checkpoints: `rl/runs/<tag>/latest.pt` every iter; episodes stream to
-`rl/runs/<tag>/episodes.jsonl`.
+Checkpoints: `rl/runs/<tag>/latest.pt` every 20 iters; episodes stream to
+`rl/runs/<tag>/episodes.jsonl`; a `heartbeat` file's mtime is touched
+every iteration for the supervisor's stall watchdog.
 
 ## Restarting a run (learned the hard way — twice)
 
@@ -100,7 +101,13 @@ The pipeline stays near that ceiling: per-episode `setLevel` costs ~ms.
 train.py can die silently (GPU faults, OOM) and sit dead for hours.
 supervise.sh wraps the launch: relaunches on ANY exit, sleeps 30s after
 long runs, backs off linearly on <5min crashes, gives up after 5 fast
-crashes. Launch/exit history in runs/supervise.<tag>.log.
+crashes. Launch/exit history in runs/supervise.<tag>.log. A stall
+watchdog kills the trainer when neither `heartbeat` (touched every iter)
+nor `latest.pt` advances for 600s — a GPU-queue hang recovers instead of
+burning hours. (The watchdog used to key on `latest.pt` alone: saves
+land every 20 iters ≈ 10-18min, so any run below ~365 env-steps/s —
+contention, CPU device, bigger maps — got killed at 15min, resumed, and
+was killed again inside a zombie loop.)
 
   RL_*=… nohup ./supervise.sh genobs --envs 8 ... --ckpt runs/genobs/latest.pt &
 

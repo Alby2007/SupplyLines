@@ -21,12 +21,14 @@
 
 - `level`, `mapp` — which map + its parameter vector (per-map and
   per-parameter regressions)
-- `reason` — the death taxonomy; `null`/`truncated` = hit the 15-min cap
+- `reason` — the death taxonomy; `null` = hit the 15-min cap (also
+  `truncated: true` on those records)
 - `food` — the postmortem: coverage (`unassigned`), staffing (`mktStaffed`),
   stock, production (`farmStaffed`), and the capacity gap (`trucks` active
   vs `fleet`, `hiredDrv` hired drivers live at death)
 - `upgradeOffers`/`upgrades` — the lottery's choices vs the policy's picks
-- `acts` — action histogram per episode; the collapse/emergence detector
+- `acts` — action histogram per episode (actions *taken*; `actsFailed`
+  splits off applies that did nothing); the collapse/emergence detector
 
 **Run boundaries matter**: restarts reset `iter` to 1. Boundary markers are
 recorded in commit messages (e.g. `episodes.jsonl` line 6675 = last

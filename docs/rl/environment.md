@@ -2,7 +2,8 @@
 
 Each worker is a Node process running the unmodified sim at 60 ticks/s. The
 agent decides at `DECIDE_DT = 0.5s` sim cadence; an episode ends on game-over
-or the `MAX_SECONDS = 15min` cap (truncation).
+or the `MAX_SECONDS = 15min` cap (truncation — GAE bootstraps the critic's V
+at the terminal obs there, vs zero for a real death).
 
 ## Wire protocol
 
@@ -22,6 +23,12 @@ feats:  f16 action feature matrix       (n_actions × afd)
 Python side: `EnvWorker` spawns/frames; `VecEnv` batches N workers, splits
 them into `n_groups` for double-buffered rollouts (one group sims while the
 other's batch is decoded/scored — see `rl/rollout.py`).
+
+Action frames are stateful: `step`'s `a` indexes the action list enumerated
+by the previous reply. `bcstep` invalidates it (`pending = null`) — a `step`
+there (or before any `reset`) replies with an `error` frame instead of
+silently applying a stale index to a freshly enumerated list. Terminal
+replies carry an empty action frame (the obs is discarded anyway).
 
 ## Observation
 

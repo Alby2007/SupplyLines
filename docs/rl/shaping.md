@@ -10,7 +10,7 @@ improvement, costs on regression, immune to farming):
 |---|---|---|---|---|
 | meter relief | max building meter past 50% | 2.0 | always on | works |
 | hunger | `max(0, worst−0.4) + 0.25·mean` over homes | 3.0 | `RL_FOODSHAPE` (default on) | **verified** |
-| delivery event | milkrun lands (`fedAt` stamps) | +0.3/drop | same | verified |
+| delivery event | milkrun lands (`fedAt` stamps — couriers stamp `courierFedAt` instead, so the bypass never pays this term) | +0.3/drop | same | verified |
 | coverage | `unassignedHomes / homes` | 2.5 | `RL_COVERSHAPE` (default on) | weak positive |
 | ~~driver-cap~~ | `Σ(driverGap)/Σ(fleet)` | 1.5 | `RL_DRIVERSHAPE` (removed) | **inert — see below** |
 

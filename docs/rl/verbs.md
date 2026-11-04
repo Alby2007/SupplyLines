@@ -7,7 +7,7 @@ type one-hot, color, `costFrac`, `meter`, `wait`, `dist`, `stops`, `freight`,
 | verb | what it does | features |
 |---|---|---|
 | `noop` | pass the decision | — |
-| `connect` | draw road to an unserved building (≤24/step, hottest first) | color, tiles cost, meter, bridge cost |
+| `connect` | draw road to an unserved building (≤24/step, hottest first); goals filtered to `mergeableGoalCells` — a plan can only land where a draw snaps into the network, same as the bot's `tryConnect` | color, tiles cost, meter, bridge cost |
 | `connect(alt)` | a second route under congestion (`alt=1`) | same + congestion-penalty pathing |
 | `roadlink` | road-to-road links | — |
 | `line` | new/extend transit line or bus route (`bus=1`) | color, stops, freight/rescue flags |
@@ -103,8 +103,10 @@ Checkpoint: `runs/genobs/shuttle_it115.pt`.
 The first *amortizing* verb: targets buildings already touching roads but
 disconnected from the serving component (topology gaps, not worker
 scarcity), computes a whole-path bridge to the service component, and
-permanently repairs the connectivity. Unlike courier/shuttle it pays once
-and fixes forever — crisis count amortizes instead of re-treading.
+permanently repairs the connectivity. Serving-component goal cells are
+filtered through `mergeableGoalCells` per component, so the draw always
+lands inside the target network's merge radius. Unlike courier/shuttle it
+pays once and fixes forever — crisis count amortizes instead of re-treading.
 
 **Verdict: retained** — ~22% adoption with a matched +0.3-0.9wk lift on
 the maps where topology gaps were the binding constraint. Gated by
