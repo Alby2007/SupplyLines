@@ -75,4 +75,9 @@ class ActorCritic(nn.Module):
         e = emb.unsqueeze(1).expand(b, a, emb.shape[1])
         logits = self.score(torch.cat([e, feats], dim=-1)).squeeze(-1)  # [B,A]
         logits = logits.masked_fill(~mask, -1e9)
-        return logits, self.value(emb).squeeze(-1)
+        # critic reads the trunk but doesn't shape it — TD divergence
+        # (bootstrapped v chasing its own drift) used to ride the shared
+        # gradient back into the trunk and saturate the policy's logits
+        # (ent→0 twice). Detached, worst case is a bad critic — not a
+        # corrupted actor.
+        return logits, self.value(emb.detach()).squeeze(-1)

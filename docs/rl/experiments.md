@@ -300,3 +300,34 @@ Design consequence: the agent exploits a deep regime when the game
 provides one — the sampled-vs-argmax gap (~3wk) hid most of its
 ability. Mechanics that raise the NATIVE ceiling (prosperity-gated
 growth, bounded threats) are now evidence-justified.
+
+## T0+T1: calm-native difficulty + freight-linked budget — VERDICT: works
+
+First ceiling-raising mechanics landed: T0 = the calm preset adopted as
+the research-native tuning (env multipliers, unchanged); T1 = endogenous
+budget — `CONFIG.roads.freightTiles = 0.25`, each weekly crate earns
+bonus road tiles (autoplay.mjs + main.js week rollover, RL_FREIGHTTILES
+env gate for ablation). Design intent: capability ∝ throughput, so the
+pressure race is winnable by play rather than lost to the calendar.
+
+Run: commuter_it80 lineage, calm env + T1 live, 33-map train pool.
+Converged to another saturated artifact (entropy drained ~it 300-500 —
+the slow-march failure mode persists under klstop, just slower), but
+T1-aware this time: sampled del climbed 355→704/ep (≈58 crates/wk)
+while learning — the freight-economy fingerprint.
+
+Held-out eval, t1frozen_it540 vs calmfrozen_it480 (argmax, 8 eps/lv,
+calm+T1): mean 11.3 vs 10.4 · med-of-meds 13 vs 12 · cap-survivals
+19 on 8/10 levels vs 12 on 6/10 · median wins 7 / losses 2 / tie 1.
+Gains concentrate exactly on the prior gap maps: L140 +5 med, L135 +2,
+L148 +3 with 4 survivals. L145 the sole holdout (9/8.4, understaffed-
+dominated). L2/L150 regressed ~2-3 (n=8, could be seed variance).
+New minor failure signature: 'Food rotted at a farm' on 4 levels —
+freight-heavy play can glut farm output.
+
+Read: the endogenous-budget loop measurably buys deep-regime capacity
+on held-out maps — evidence for the feedback-loop design pattern
+(T2 prosperity-gated growth is the next candidate on the same principle;
+T3 worker demographics attacks the residual understaffing wall).
+Trainer stability remains the open problem: two strong artifacts now,
+both reached via saturation rather than a reproducible stable climb.

@@ -83,7 +83,15 @@ function tick(state, dt) {
     state.weekT = 0;
     state.week++;
     state.upgradePending = true;
-    state.roadTiles = Math.min(CONFIG.roads.tilesCap, state.roadTiles + CONFIG.roads.tilesPerWeek);
+    // freight-linked budget (T1): weekly crates earn bonus tiles —
+    // RL_FREIGHTTILES overrides the rate for probes / 0 ablates the
+    // mechanic for pre-mechanic checkpoint evaluation
+    const frate = process.env.RL_FREIGHTTILES != null
+      ? +process.env.RL_FREIGHTTILES : (CONFIG.roads.freightTiles ?? 0);
+    const fDelta = state.freightDelivered - (state.freightWeek0 ?? 0);
+    state.roadTiles = Math.min(CONFIG.roads.tilesCap,
+      state.roadTiles + CONFIG.roads.tilesPerWeek + frate * fDelta);
+    state.freightWeek0 = state.freightDelivered;
   }
   const PH = process.env.BOTPHASE
     ? (name) => { if (name) console.log(`t=${state.time.toFixed(2)} phase=${name}`); }

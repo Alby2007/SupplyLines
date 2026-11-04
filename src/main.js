@@ -72,7 +72,10 @@ function tick(dt) {
     state.weekT = 0;
     state.week++;
     state.upgradePending = true;
-    state.roadTiles = Math.min(CONFIG.roads.tilesCap, state.roadTiles + CONFIG.roads.tilesPerWeek);
+    const fDelta = state.freightDelivered - (state.freightWeek0 ?? 0);
+    state.roadTiles = Math.min(CONFIG.roads.tilesCap,
+      state.roadTiles + CONFIG.roads.tilesPerWeek + (CONFIG.roads.freightTiles ?? 0) * fDelta);
+    state.freightWeek0 = state.freightDelivered;
   }
   spawn.update(state, dt);
   economy.update(state, dt);

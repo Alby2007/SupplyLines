@@ -154,6 +154,9 @@ export const CONFIG = {
     turnRadius: 12,         // px — corner fillet radius on vehicle paths
     tilesStart: 40,         // road budget at game start
     tilesPerWeek: 18,       // road budget granted each week
+    freightTiles: 0.25,     // bonus tiles per crate delivered that week —
+                            // capability scales with working freight, so the
+                            // pressure race is won by play, not the calendar
     tilesCap: 99,
   },
   motorways: {

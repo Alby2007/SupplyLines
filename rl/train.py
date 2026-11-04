@@ -211,8 +211,9 @@ def main():
             return src[mb_t] if torch.is_tensor(src) else torch.as_tensor(src[mb_np], device=dev)
 
         pl = torch.zeros((), device=dev); vl = torch.zeros((), device=dev); el = torch.zeros((), device=dev)
-        nb = 0; nskip = 0
+        nb = 0; nskip = 0; klstop = 0
         for ep in range(args.epochs):
+            if klstop: break
             np.random.shuffle(idx)
             idx_t = torch.as_tensor(idx, device=dev)
             for s in range(0, T * N, args.minibatch):
@@ -225,12 +226,13 @@ def main():
                 logits, v = net(g, gl, f, m)
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
                 logp = dist.log_prob(a)
-                ld = (logp - take(slogp, mb, mb_t)).clamp(-20, 20)
+                old_lp = take(slogp, mb, mb_t)
+                ld = (logp - old_lp).clamp(-20, 20)
                 ratio = ld.exp()
                 madv = take(sadv, mb, mb_t)
                 pg1, pg2 = -madv * ratio, -madv * ratio.clamp(1 - args.clip, 1 + args.clip)
                 ploss = torch.max(pg1, pg2).mean()
-                vloss = F.mse_loss(v, take(sret, mb, mb_t))
+                vloss = F.smooth_l1_loss(v, take(sret, mb, mb_t))
                 ent = dist.entropy().mean()
                 loss = ploss + args.vf * vloss - args.ent * ent
                 if not torch.isfinite(loss):
@@ -242,6 +244,12 @@ def main():
                     opt.zero_grad(); nskip += 1; continue
                 opt.step()
                 pl += ploss.detach(); vl += vloss.detach(); el += ent.detach(); nb += 1
+                # KL early-stop: once the policy has moved ~0.03 nats from the
+                # rollout policy, every later minibatch this epoch trains a
+                # policy the batch never sampled — the runaway path that
+                # saturates logits (ent→0) after ~50 healthy iters
+                if (old_lp - logp).mean().item() > 0.03:
+                    klstop += 1; break
         pl, vl, el = pl.item(), vl.item(), el.item()   # one sync per iteration, not 3 per minibatch
         del srcs, sg, sgl, sf, sm, sa, slogp, sadv, sret
 
@@ -263,7 +271,8 @@ def main():
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
                   f'del {np.mean(dr) if dr else 0:.0f} | acts {astr} | '
                   f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f} rsd {ret_sd:.1f}'
-                  + (f' nskip {nskip}' if nskip else ''), flush=True)
+                  + (f' nskip {nskip}' if nskip else '')
+                  + (' klstop' if klstop else ''), flush=True)
             # write ALL finished episodes — truncating to `recent` would drop
             # every episode beyond the last 30 in the window
             with open(os.path.join(run_dir, 'episodes.jsonl'), 'a') as fh:
