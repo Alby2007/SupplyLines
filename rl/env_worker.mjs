@@ -394,8 +394,8 @@ const noopLog = () => {};
 
 function enumerate(state) {
   const acts = [];
-  const push = (o, apply, desc) =>
-    acts.length < MAXA && acts.push({ feat: feat(o), apply, desc, type: o.type });
+  const push = (o, apply, desc, op = null) =>
+    acts.length < MAXA && acts.push({ feat: feat(o), apply, desc, type: o.type, op });
 
   if (state.upgradePending) {
     const offers = state._offers ?? makeOffers(state);
@@ -404,7 +404,7 @@ function enumerate(state) {
       offers.forEach((u) => push(
         { type: 'upgrade', upgradeIdx: UPGRADES.indexOf(u) },
         () => { epUpgrades.push(u.name); u.apply(state); state.upgradePending = false; state._offers = null; return 0.05; },
-        `upgrade:${u.name}`));
+        `upgrade:${u.name}`, { kind: 'upgrade', idx: UPGRADES.indexOf(u), name: u.name }));
       return acts;
     }
     // makeOffers cleared upgradePending (nothing eligible) — fall through to
@@ -445,7 +445,7 @@ function enumerate(state) {
         bridgeFrac: c.wet / 12,
         meter: c.meter, wait: b.waiting.length / b.capacity, dist: c.cells.length * CONFIG.grid.cell },
       () => { if (buildRoad(state, c.cells).length) { state.roadTiles -= c.cost; return 0.15; } return 0; },
-      `connect ${b.type}#${b.id}${b.active ? '' : ' (pending)'}`);
+      `connect ${b.type}#${b.id}${b.active ? '' : ' (pending)'}`, { kind: 'road', cells: c.cells });
   }
   const nConnects = acts.length - beforeConnects;
 
@@ -474,7 +474,8 @@ function enumerate(state) {
         meter: c.meter, wait: c.b.waiting.length / c.b.capacity,
         dist: cells.length * CONFIG.grid.cell, alt: true },
       () => { if (buildRoad(state, cells).length) { state.roadTiles -= cost; return 0.15; } return 0; },
-      `connect(alt) ${c.b.type}#${c.b.id}${c.b.active ? '' : ' (pending)'}`);
+      `connect(alt) ${c.b.type}#${c.b.id}${c.b.active ? '' : ' (pending)'}`,
+      { kind: 'road', cells });
   }
 
   // reconnect: the class connect's mask can't see — buildings already on a
@@ -555,7 +556,7 @@ function enumerate(state) {
           meter: c.meter, wait: (b.waiting?.length ?? 0) / (b.capacity || 1),
           dist: c.cells.length * CONFIG.grid.cell, rescue: b.type === 'home' },
         () => { if (buildRoad(state, c.cells).length) { state.roadTiles -= c.cost; return 0.15; } return 0; },
-        `reconnect ${b.type}#${b.id}`);
+        `reconnect ${b.type}#${b.id}`, { kind: 'road', cells: c.cells });
     }
   }
 
@@ -568,7 +569,7 @@ function enumerate(state) {
         if (c.ext) { extendLine(state, c.ext.line, [c.ext.stop], false); return 0.12; }
         newLine(state, c.stops, noopLog, c.why); return 0.15;
       },
-      `line ${c.why}: ${c.stops.join('→')}`);
+      `line ${c.why}: ${c.stops.join('→')}`, { kind: 'line', stops: c.stops });
   }
 
   // deliberate interchanges: splice a junction into two lines whose tracks
@@ -584,7 +585,7 @@ function enumerate(state) {
         insertJunction(state, j, c.B.line, c.B.segIdx);
         return 0.1;
       },
-      `junction lines ${c.A.line.id}×${c.B.line.id}`);
+      `junction lines ${c.A.line.id}×${c.B.line.id}`, { kind: 'junction', x: c.x, y: c.y });
   }
 
   // bus routes: free transit over existing roads — the modal-choice action.
@@ -612,7 +613,7 @@ function enumerate(state) {
         { type: 'line', bus: true, color: p.h.color, stops: 2, dist: p.d,
           meter: meterOf(p.w) },
         () => { const l = addBusLine(state, [p.h.id, p.w.id]); return l ? 0.12 : 0; },
-        `bus ${p.h.id}→${p.w.id} (${Math.round(p.d)}px road-borne)`);
+        `bus ${p.h.id}→${p.w.id} (${Math.round(p.d)}px road-borne)`, { kind: 'line', stops: [p.h.id, p.w.id] });
     }
   }
 
@@ -840,7 +841,7 @@ function enumerate(state) {
         { type: 'demolish', demo: 1, costFrac: -(c.n - c.wet) / CONFIG.roads.tilesCap,
           bridgeFrac: -c.wet / 12, meter: c.dens },
         demolishEdge(c.e),
-        `demolish spur edge#${c.e.id} (+${c.n - c.wet} tiles${c.wet ? `, +${c.wet} bridges` : ''})`);
+        `demolish spur edge#${c.e.id} (+${c.n - c.wet} tiles${c.wet ? `, +${c.wet} bridges` : ''})`, { kind: 'demolish', eid: c.e.id });
     }
 
     // jammed links: the densest surface edges whose ends stay connected
@@ -859,7 +860,7 @@ function enumerate(state) {
         { type: 'demolish', demo: 1, costFrac: -nCells(e) / CONFIG.roads.tilesCap,
           meter: densOf(e) },
         demolishEdge(e),
-        `demolish jammed edge#${e.id} (dens ${densOf(e).toFixed(2)})`);
+        `demolish jammed edge#${e.id} (dens ${densOf(e).toFixed(2)})`, { kind: 'demolish', eid: e.id });
     }
 
     // idle span: a placed motorway only returns to stock via demolition —
@@ -906,7 +907,7 @@ function enumerate(state) {
           { type: 'demolish', demo: 0, color: c.l.color, stops: c.l.stops.length,
             freight: c.l.freight, wait: Math.min(1, c.load / 30) },
           () => { if (state.lines.has(c.l.id)) { deleteLine(state, c.l); return 0.05; } return 0; },
-          `demolish ${c.l.bus ? 'bus' : 'line'} ${c.l.id} (load ${c.load}, frees slot)`);
+          `demolish ${c.l.bus ? 'bus' : 'line'} ${c.l.id} (load ${c.load}, frees slot)`, { kind: 'demolish', lid: c.l.id });
       }
     }
 
@@ -923,7 +924,7 @@ function enumerate(state) {
       push(
         { type: 'demolish', demo: 3, wait: b.waiting.length / Math.max(1, b.capacity) },
         () => { if (state.buildings.get(b.id) === b) { removeJunction(state, b); return 0.05; } return 0; },
-        `demolish junction#${b.id} (${thru} line${thru === 1 ? '' : 's'}${jam ? ', jammed' : ''})`);
+        `demolish junction#${b.id} (${thru} line${thru === 1 ? '' : 's'}${jam ? ', jammed' : ''})`, { kind: 'demolish', jid: b.id });
     }
   }
 
@@ -951,7 +952,7 @@ function enumerate(state) {
         { type: 'roadlink', color: c.w.color, costFrac: cost / Math.max(1, state.roadTiles),
           meter: meterOf(c.w), dist: cells.length * CONFIG.grid.cell },
         () => { if (buildRoad(state, cells).length) { state.roadTiles -= cost; return 0.15; } return 0; },
-        `roadlink home#${c.h.id}→work#${c.w.id} (${c.ratio.toFixed(1)}× detour)`);
+        `roadlink home#${c.h.id}→work#${c.w.id} (${c.ratio.toFixed(1)}× detour)`, { kind: 'road', cells });
     }
   }
 
@@ -972,7 +973,7 @@ function enumerate(state) {
       push(
         { type: 'motorway', color: p.a.color, dist: p.d, meter: meterOf(p.b) },
         () => { if (buildMotorway(state, [{ x: p.a.x, y: p.a.y }, mid, { x: p.b.x, y: p.b.y }])) { state.motorways--; return 0.1; } return 0; },
-        `motorway #${p.a.id}→#${p.b.id} (${Math.round(p.d)}px)`);
+        `motorway #${p.a.id}→#${p.b.id} (${Math.round(p.d)}px)`, { kind: 'special', spec: 'motorway', x: mid.x, y: mid.y });
     }
   }
   if (state.roundabouts > 0 || state.trafficLights > 0) {
@@ -985,7 +986,7 @@ function enumerate(state) {
         const p = junctionPressure(state, n);
         push({ type: 'roundabout', meter: Math.min(1, p / 20) },
           () => { if (placeRoundabout(state, n)) { state.roundabouts--; return 0.1; } return 0; },
-          `roundabout @node${n.id} (pressure ${p})`);
+          `roundabout @node${n.id} (pressure ${p})`, { kind: 'special', spec: 'roundabout', x: n.x, y: n.y });
       }
     }
     if (state.trafficLights > 0) {
@@ -993,13 +994,13 @@ function enumerate(state) {
         const p = junctionPressure(state, n);
         push({ type: 'light', meter: Math.min(1, p / 20) },
           () => { if (placeTrafficLight(state, n, true) === 'add') { state.trafficLights--; return 0.1; } return 0; },
-          `light @node${n.id} (pressure ${p})`);
+          `light @node${n.id} (pressure ${p})`, { kind: 'special', spec: 'light', x: n.x, y: n.y });
       }
     }
   }
   // noop lands last and only when nothing is connectable — an always-legal
   // free action is a PPO attractor that collapses the policy into idling
-  if (!nConnects) push({ type: 'noop' }, () => 0, 'noop');
+  if (!nConnects) push({ type: 'noop' }, () => 0, 'noop', { kind: 'noop' });
   return acts;
 }
 
@@ -1491,6 +1492,140 @@ function doStep(aIdx) {
   return r;
 }
 
+// ---- BC collection ---------------------------------------------------------
+// bcstep: enumerate + encode the pre-decision obs, let the heuristic bot
+// decide, map its ops back to enum indices via state-diff, then tick forward
+// one decision window. Returns the PRE-decide frame + meta.info.choices so
+// (obs, feats, aIdx) tuples stream straight into BC training.
+
+function botOps(snapE, snapL, snapJ, snapLight, snapMoto, snapRa, logBuf) {
+  // snapE: Map(edgeId → Set(cellKey)) — needed to tell a true demolish
+  // (its cells are left bare) from a merge/split (cells still covered by
+  // the new edge buildRoad produced). Phantom demolishes otherwise fire
+  // on every merged build.
+  const ops = [];
+  const newCells = new Set();
+  const covered = new Set();
+  for (const e of state.roadEdges.values())
+    for (const c of cellsAlongPolyline(e.pts ?? [])) covered.add(cellKey(c));
+  const goneL = new Set(snapL.keys()), goneJ = new Set(snapJ);
+  for (const e of state.roadEdges.values()) {
+    if (!snapE.has(e.id)) {
+      // motorway/roundabout edges are 'special' ops, not road draws
+      if (!e.motorway && !e.roundabout)
+        for (const c of cellsAlongPolyline(e.pts ?? [])) newCells.add(cellKey(c));
+    }
+    if (e.motorway && !snapMoto.has(e.id)) ops.push({ kind: 'special', spec: 'motorway', x: e.pts?.[0]?.x ?? 0, y: e.pts?.[0]?.y ?? 0 });
+    if (e.roundabout && !snapRa.has(e.id)) ops.push({ kind: 'special', spec: 'roundabout', x: e.pts?.[0]?.x ?? 0, y: e.pts?.[0]?.y ?? 0 });
+    snapE.delete(e.id); // survivors drop out of the gone-tracking
+  }
+  for (const [id, cells] of snapE) {
+    let bare = false;
+    for (const k of cells) if (!covered.has(k)) { bare = true; break; }
+    if (bare) ops.push({ kind: 'demolish', eid: id });
+  }
+  for (const l of state.lines.values()) {
+    if (!snapL.has(l.id) || l.stops.length > snapL.get(l.id))
+      ops.push({ kind: 'line', stops: l.stops });
+    goneL.delete(l.id);
+  }
+  for (const b of state.buildings.values()) {
+    if (b.type === 'junction') {
+      if (!snapJ.has(b.id)) ops.push({ kind: 'junction', x: b.x, y: b.y });
+      goneJ.delete(b.id);
+    }
+  }
+  for (const n of state.roadNodes.values())
+    if (n.light && !snapLight.has(n.id)) ops.push({ kind: 'special', spec: 'light', x: n.x, y: n.y });
+  if (newCells.size) ops.push({ kind: 'road', cells: newCells });
+  for (const id of goneL) ops.push({ kind: 'demolish', lid: id });
+  for (const id of goneJ) ops.push({ kind: 'demolish', jid: id });
+  for (const s of logBuf) {
+    const m = /^upgrade: "(.+?)"/.exec(s);
+    if (m) ops.push({ kind: 'upgradeName', name: m[1] });
+  }
+  return ops;
+}
+
+function matchOps(acts, ops) {
+  const used = new Set(), choices = [], unmappedKinds = [];
+  let unmapped = 0;
+  for (const op of ops) {
+    let bestI = -1, bestScore = 0;
+    for (let i = 0; i < acts.length; i++) {
+      const co = acts[i].op;
+      if (!co || used.has(i)) continue;
+      let sc = 0;
+      if (op.kind === 'road' && co.kind === 'road') {
+        let hit = 0;
+        for (const c of co.cells) if (op.cells.has(cellKey(c))) hit++;
+        sc = hit / Math.max(1, co.cells.length);
+        if (sc < 0.4) sc = 0;
+      } else if (op.kind === 'line' && co.kind === 'line') {
+        const a = op.stops, b = co.stops;
+        sc = a.length === b.length && a.every((s, i) => s === b[i]) ? 1 :
+             (a[0] === b[0] && a[a.length - 1] === b[b.length - 1] ? 0.5 : 0);
+      } else if (op.kind === 'demolish' && co.kind === 'demolish') {
+        sc = (op.eid != null && co.eid === op.eid) || (op.lid != null && co.lid === op.lid) ||
+             (op.jid != null && co.jid === op.jid) ? 1 : 0;
+      } else if (op.kind === 'junction' && co.kind === 'junction') {
+        sc = Math.hypot(co.x - op.x, co.y - op.y) <= 40 ? 1 : 0;
+      } else if (op.kind === 'special' && co.kind === 'special' && co.spec === op.spec) {
+        sc = Math.hypot(co.x - op.x, co.y - op.y) <= 120 ? 1 : 0;
+      } else if (op.kind === 'upgradeName' && co.kind === 'upgrade') {
+        sc = co.name === op.name ? 1 : 0;
+      }
+      if (sc > bestScore) { bestScore = sc; bestI = i; }
+    }
+    if (bestI >= 0) { used.add(bestI); choices.push(bestI); }
+    else { unmapped++; unmappedKinds.push(op.kind + (op.spec ? ':' + op.spec : '')); }
+  }
+  if (!ops.length) {
+    const i = acts.findIndex((a) => a.op?.kind === 'noop');
+    if (i >= 0) choices.push(i);
+  }
+  return { choices, unmapped, unmappedKinds };
+}
+
+function doBcStep() {
+  const acts = enumerate(state);
+  const obs = encodeObs(state), feats = packFeats(acts);
+  const snapE = new Map();
+  for (const e of state.roadEdges.values()) {
+    const cs = new Set();
+    for (const c of cellsAlongPolyline(e.pts ?? [])) cs.add(cellKey(c));
+    snapE.set(e.id, cs);
+  }
+  const snapL = new Map([...state.lines.values()].map((l) => [l.id, l.stops.length]));
+  const snapJ = new Set([...state.buildings.values()].filter((b) => b.type === 'junction').map((b) => b.id));
+  const snapLight = new Set([...state.roadNodes.values()].filter((n) => n.light).map((n) => n.id));
+  const snapMoto = new Set([...state.roadEdges.values()].filter((e) => e.motorway).map((e) => e.id));
+  const snapRa = new Set([...state.roadEdges.values()].filter((e) => e.roundabout).map((e) => e.id));
+  const logBuf = [];
+  const lg = (s) => logBuf.push(s);
+  if (state.upgradePending) pickUpgrade(state, lg, rng, state._offers);
+  else decide(state, lg);
+  const ops = botOps(snapE, snapL, snapJ, snapLight, snapMoto, snapRa, logBuf);
+  const { choices, unmapped, unmappedKinds } = matchOps(acts, ops);
+  const sT = t0();
+  let t = 0, guard = 0;
+  while (t < DECIDE_DT - 1e-9 && !state.gameOver && !state.upgradePending && guard++ < 240) {
+    tick(state, STEP, rng); t += STEP;
+  }
+  add('tick', sT);
+  const done = !!state.gameOver || state.time >= MAX_SECONDS;
+  pending = null;
+  return {
+    obs, feats, reward: 0, done,
+    info: {
+      week: state.week, time: +state.time.toFixed(1),
+      reason: state.gameOver?.reason ?? null,
+      steps, level: state.level,
+      choices, unmapped, unmappedKinds, ops: ops.map((o) => o.kind),
+    },
+  };
+}
+
 const rl = readline.createInterface({ input: process.stdin });
 process.stdout.write(JSON.stringify({ ready: true, ch: CH, gd: GD, afd: AFD, rows: OBSROWS, cols: OBSCOLS }) + '\n');
 rl.on('line', (line) => {
@@ -1504,6 +1639,10 @@ rl.on('line', (line) => {
       const s = t0();
       process.stdout.write(serialize(r));
       add('json', s);
+    } else if (msg.cmd === 'bcstep') {
+      T.n++;
+      const r = doBcStep();
+      process.stdout.write(serialize(r));
     } else if (msg.cmd === 'step') {
       T.n++;
       const r = doStep(msg.a ?? 0);
