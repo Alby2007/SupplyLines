@@ -155,7 +155,6 @@ invalidate the line cell cache too (harmless, slightly wasteful).
 | `_lineSegIdx`/`_lineSegV` | `lineSegCellIndex` | `netVersion` |
 | `_graphs` | `graphFor` (routing) | `netVersion` + `floor(time/0.8)` |
 | `_tick`, `_yieldIdx`, `_yieldV` | vehicle yield buckets | per `update()` call |
-| `_camInit` | main.js | one-shot camera centering |
 
 ## Conventions
 

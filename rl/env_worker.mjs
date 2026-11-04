@@ -362,7 +362,7 @@ function makeOffers(state) {
   const pool = UPGRADES.filter((u) => u.ok(state));
   const offers = [];
   while (offers.length < 2 && pool.length)
-    offers.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    offers.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
   if (!offers.length) { state.upgradePending = false; return null; }
   epOffers.push(offers.map((u) => u.name)); // what the agent was shown
   return offers;
@@ -1126,7 +1126,9 @@ function packFeats(acts) {
 // ---- env loop ---------------------------------------------------------------
 
 let state = null;
-let rng = null;
+let rng = Math.random; // per-episode seeded draw (srand) — set by doReset; the
+                       // sim ticks, env branching, and offer sampling all draw
+                       // from it in order so a seed reproduces an episode
 let steps = 0;
 let prevExcess = 0; // worst meter pressure above the danger line — shaping
 let prevHungerP = 0; // food-specific pressure, tracked separately — see below
@@ -1243,18 +1245,18 @@ function deepClone(v) {
 function pickSnapshot() {
   let sum = 0;
   for (const s of archive) sum += s.week;
-  let r = Math.random() * sum;
+  let r = rng() * sum;
   for (const s of archive) { r -= s.week; if (r <= 0) return s; }
   return archive[archive.length - 1];
 }
 
 function doReset(seed, warm = 0) {
-  Math.random = srand(seed);
+  rng = srand(seed);
   // restore branch: resume from a frontier snapshot instead of building a new
   // world — the agent explores onward from states it actually reached. The
   // stream keeps running off this seed, so each branch diverges on its own
   // draws; `restored` is stamped on the episode record for analysis.
-  if (RESTORE > 0 && archive.length && Math.random() < RESTORE) {
+  if (RESTORE > 0 && archive.length && rng() < RESTORE) {
     const snap = pickSnapshot();
     setLevel(snap.snap.level); // the episode continues on the snapshot's map
     state = deepClone(snap.snap);
@@ -1268,26 +1270,26 @@ function doReset(seed, warm = 0) {
     return respond(0, false);
   }
   epRestored = 0;
-  const lvl = LEVELS[Math.floor(Math.random() * LEVELS.length)];
+  const lvl = LEVELS[Math.floor(rng() * LEVELS.length)];
   setLevel(lvl); // restore base sections, then this map's overrides
   state = createState();
   state.level = lvl;
   applyLevelFeatures(state);
   steps = 0;
   epActs = {}; epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
-  for (let i = 0; i < 30; i++) tick(state, STEP); // let the seed cluster open
+  for (let i = 0; i < 30; i++) tick(state, STEP, rng); // let the seed cluster open
   // reverse-curriculum warm start: the heuristic bot pre-plays a random
   // prefix so episodes reach the states runs actually die in — agent and
   // critic get gradient on week-5+ pressure from iteration 1. A quarter of
   // resets stay cold so opening play doesn't atrophy.
-  const warmK = Math.random() < 0.25 ? 0 : Math.random() * warm;
+  const warmK = rng() < 0.25 ? 0 : rng() * warm;
   const sW = t0();
   let t = 0, dt = 0;
   while (t < warmK && !state.gameOver) {
-    tick(state, STEP);
+    tick(state, STEP, rng);
     t += STEP;
     dt -= STEP;
-    if (state.upgradePending) pickUpgrade(state, noopLog);
+    if (state.upgradePending) pickUpgrade(state, noopLog, rng);
     if (dt <= 0) { dt = 0.4; decide(state, noopLog); }
   }
   add('warm', sW);
@@ -1364,7 +1366,7 @@ function doStep(aIdx) {
   const sT = t0();
   let t = 0, guard = 0;
   while (t < DECIDE_DT - 1e-9 && !state.gameOver && !state.upgradePending && guard++ < 240) {
-    tick(state, STEP);
+    tick(state, STEP, rng);
     t += STEP;
   }
   add('tick', sT);
@@ -1390,7 +1392,7 @@ function doStep(aIdx) {
     lastSnapWeek = state.week;
     const entry = { snap: deepClone(state), week: state.week };
     if (archive.length < ARCHIVE_CAP) archive.push(entry);
-    else archive[Math.floor(Math.random() * archive.length)] = entry;
+    else archive[Math.floor(rng() * archive.length)] = entry;
   }
   const done = !!state.gameOver || state.time >= MAX_SECONDS;
   // the game's actual objective as a terminal bonus — shaped meter relief

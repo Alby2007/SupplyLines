@@ -8,9 +8,8 @@ modules + HTML5 Canvas. No build step, no dependencies.
 
 ```sh
 python3 serve.py        # http://localhost:8000 (adds no-store headers)
-# or
-python3 -m http.server 8000
-npm test                # 110 tests, node:test, runs in ~1s
+# or: npm run serve     (same thing — plain http.server serves stale modules)
+npm test                # 122 tests, node:test, runs in ~1s
 node autoplay.mjs --runs=12   # headless bot plays seeded games + postmortems
 ```
 

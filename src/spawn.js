@@ -4,7 +4,7 @@ import { cellOf, cellCenter, cellKey, buildingCells } from './grid.js';
 import { roadCellIndex, connectBuildingToRoad } from './roads.js';
 import { lineCellIndex } from './networks.js';
 
-export function seedInitial(state) {
+export function seedInitial(state, rng = Math.random) {
   // opening cluster lands in the middle third of the world — not dead centre,
   // just "middle-ish"
   const CS = CONFIG.grid.cell;
@@ -22,8 +22,8 @@ export function seedInitial(state) {
     cy0: m + Math.floor((rows - 2 * m) / 3),
     cy1: m + Math.floor(2 * (rows - 2 * m) / 3),
   };
-  placeBuilding(state, 'home', true, undefined, region);
-  placeBuilding(state, 'work', true, undefined, region);
+  placeBuilding(state, 'home', true, undefined, region, rng);
+  placeBuilding(state, 'work', true, undefined, region, rng);
 }
 
 // ---- colours ----
@@ -41,7 +41,7 @@ function countByType(state, type, color) {
 // pick a colour for a new building so it can actually function:
 // homes need a same-colour workplace; works want homes; markets want
 // uncovered home colours. Fallback: any unlocked colour.
-export function pickColor(state, type) {
+export function pickColor(state, type, rng = Math.random) {
   const U = state.unlockedColors;
   if (type === 'home') {
     let best = null, bestScore = -Infinity;
@@ -71,7 +71,7 @@ export function pickColor(state, type) {
     }
     if (best != null) return best;
   }
-  return U[Math.floor(Math.random() * U.length)];
+  return U[Math.floor(rng() * U.length)];
 }
 
 // live people (waiting + riding) per colour — a colour that sustains a big
@@ -99,7 +99,7 @@ function checkColorUnlocks(state) {
   }
 }
 
-export function placeBuilding(state, type, instant = false, forcedColor = undefined, region = null) {
+export function placeBuilding(state, type, instant = false, forcedColor = undefined, region = null, rng = Math.random) {
   const CS = CONFIG.grid.cell;
   const cols = Math.floor(CONFIG.map.width / CS);
   const rows = Math.floor(CONFIG.map.height / CS);
@@ -117,16 +117,16 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
     // occupy the single cell they're centred on
     const cells = type === 'work' ? (() => {
       const v = {
-        cx: R.cx0 + 1 + Math.floor(Math.random() * Math.max(1, R.cx1 - R.cx0)),
-        cy: R.cy0 + 1 + Math.floor(Math.random() * Math.max(1, R.cy1 - R.cy0)),
+        cx: R.cx0 + 1 + Math.floor(rng() * Math.max(1, R.cx1 - R.cx0)),
+        cy: R.cy0 + 1 + Math.floor(rng() * Math.max(1, R.cy1 - R.cy0)),
       };
       return [
         { cx: v.cx - 1, cy: v.cy - 1 }, { cx: v.cx, cy: v.cy - 1 },
         { cx: v.cx - 1, cy: v.cy }, v,
       ];
     })() : [{
-      cx: R.cx0 + Math.floor(Math.random() * Math.max(1, R.cx1 - R.cx0 + 1)),
-      cy: R.cy0 + Math.floor(Math.random() * Math.max(1, R.cy1 - R.cy0 + 1)),
+      cx: R.cx0 + Math.floor(rng() * Math.max(1, R.cx1 - R.cx0 + 1)),
+      cy: R.cy0 + Math.floor(rng() * Math.max(1, R.cy1 - R.cy0 + 1)),
     }];
     if (cells.some((c) => blocked.has(cellKey(c)))) continue;
     // spacing keeps buildings apart; reach keeps them near the city — the map
@@ -156,7 +156,7 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
     id: nid(state),
     type,
     shape: SHAPES[type],
-    color: type === 'farm' ? null : (forcedColor ?? pickColor(state, type)),
+    color: type === 'farm' ? null : (forcedColor ?? pickColor(state, type, rng)),
     x: pos.x,
     y: pos.y,
     waiting: [],
@@ -165,7 +165,7 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
     active: instant,
     bornAt: state.time,  // spawn-ping arrows show while the building is fresh
     openAt: instant ? 0 : state.time + CONFIG.spawn.warnTime,
-    spawnClock: CONFIG.commuters.interval * Math.random(),
+    spawnClock: CONFIG.commuters.interval * rng(),
     workers: [],       // shift timers — farms/markets operate when staffed
     stock: 0,          // crates held (markets only)
     hungerT: -CONFIG.food.pantryStart, // homes: negative = pantry buffer before hunger ticks
@@ -187,7 +187,7 @@ export function placeBuilding(state, type, instant = false, forcedColor = undefi
 // a subdivision tract: `size` same-colour homes placed as one estate a few
 // cells past a random anchor building — lands with the normal incoming warn,
 // so it reads as a single event to prepare for, not six separate emergencies
-function placeSubdivision(state) {
+function placeSubdivision(state, rng = Math.random) {
   const anchors = [...state.buildings.values()].filter(
     (b) => b.active && b.type !== 'junction');
   if (!anchors.length) return false;
@@ -198,9 +198,9 @@ function placeSubdivision(state) {
   const S = CONFIG.subdivision;
   // a few anchor/direction attempts — the tract needs room off the blob edge
   for (let t = 0; t < 8; t++) {
-    const a = anchors[Math.floor(Math.random() * anchors.length)];
-    const dir = Math.random() * Math.PI * 2;
-    const d = S.ringMin + Math.random() * (S.ringMax - S.ringMin);
+    const a = anchors[Math.floor(rng() * anchors.length)];
+    const dir = rng() * Math.PI * 2;
+    const d = S.ringMin + rng() * (S.ringMax - S.ringMin);
     const ac = cellOf(a);
     const cx = ac.cx + Math.round(Math.cos(dir) * d);
     const cy = ac.cy + Math.round(Math.sin(dir) * d);
@@ -210,11 +210,11 @@ function placeSubdivision(state) {
       cy0: clamp(cy - S.span, m, rows - m - 1), cy1: clamp(cy + S.span, m, rows - m - 1),
     };
     if (region.cx1 - region.cx0 < 2 || region.cy1 - region.cy0 < 2) continue;
-    const color = pickColor(state, 'home');
-    const want = S.sizeMin + Math.floor(Math.random() * (S.sizeMax - S.sizeMin + 1));
+    const color = pickColor(state, 'home', rng);
+    const want = S.sizeMin + Math.floor(rng() * (S.sizeMax - S.sizeMin + 1));
     let placed = 0;
     for (let i = 0; i < want; i++) {
-      const b = placeBuilding(state, 'home', false, color, region);
+      const b = placeBuilding(state, 'home', false, color, region, rng);
       if (!b) continue;
       // tracts telegraph longer than a lone building — an estate is a burst,
       // not an emergency; the extra warn is what makes staging it possible
@@ -226,9 +226,9 @@ function placeSubdivision(state) {
   return false;
 }
 
-export function update(state, dt) {
+export function update(state, dt, rng = Math.random) {
   if (state.buildings.size === 0) {
-    seedInitial(state);
+    seedInitial(state, rng);
     return;
   }
   // tracts land on a jittered cadence once the basics exist — crowded maps
@@ -237,9 +237,9 @@ export function update(state, dt) {
   // would have spawned anyway, so it's a spatial event (a burst to stage
   // for), not net extra growth the network never budgeted for
   if (CONFIG.subdivision && state.time >= (state.subdivAt ?? Infinity)) {
-    const placed = placeSubdivision(state);
+    const placed = placeSubdivision(state, rng);
     state.subdivAt = placed
-      ? state.time + CONFIG.subdivision.every * (0.7 + Math.random() * 0.6)
+      ? state.time + CONFIG.subdivision.every * (0.7 + rng() * 0.6)
       : state.time + 20;
     if (placed) state.spawnClock += placed * spawnInterval(state);
   }
@@ -250,7 +250,7 @@ export function update(state, dt) {
   // one attempt per pending seed per tick — re-queued failures retry on the
   // next update (a crowded map may open up), and only give up after a while
   for (const s of state.colorSeedQueue.splice(0)) {
-    if (placeBuilding(state, s.type, false, s.color)) continue;
+    if (placeBuilding(state, s.type, false, s.color, null, rng)) continue;
     s.tries = (s.tries ?? 0) + 1;
     if (s.tries < 600) state.colorSeedQueue.push(s);
   }
@@ -263,7 +263,7 @@ export function update(state, dt) {
   state.spawnClock -= dt;
   if (state.spawnClock <= 0) {
     state.spawnClock = spawnInterval(state);
-    placeBuilding(state, pickType(state));
+    placeBuilding(state, pickType(state), false, undefined, null, rng);
   }
 }
 

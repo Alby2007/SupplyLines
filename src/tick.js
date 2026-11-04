@@ -6,6 +6,9 @@
 //                        (null/undefined → CONFIG.roads.freightTiles)
 //   opts.skip(name)    → true skips that subsystem's update this tick
 //   opts.phase(state, name) → called before each subsystem's update
+//   opts.rng           → seeded draw function (default Math.random); headless
+//                        drivers pass srand(seed) instead of monkeypatching
+//                        the global so episodes stay reproducible
 import { CONFIG } from './config.js';
 import * as spawn from './spawn.js';
 import * as economy from './economy.js';
@@ -22,6 +25,7 @@ const PHASES = [
 ];
 
 export function tick(state, dt, opts = null) {
+  const rng = opts?.rng ?? Math.random;
   state.time += dt;
   state.weekT += dt;
   if (state.weekT >= CONFIG.weekSeconds) {
@@ -39,6 +43,6 @@ export function tick(state, dt, opts = null) {
   for (const [name, mod] of PHASES) {
     if (opts?.skip?.(name)) continue;
     opts?.phase?.(state, name);
-    mod.update(state, dt);
+    mod.update(state, dt, rng);
   }
 }

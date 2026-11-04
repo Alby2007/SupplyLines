@@ -77,6 +77,7 @@ bulldozer refunds them — see roads.md.
 ## Game-over flow
 
 Any update can set `state.gameOver = { reason, x, y }`. `main.js` shows the
-card once (`gameOver.shown`), the sim halts (the `!state.gameOver` guard on
+card once (a `gameOverShown` module-local — the sim state itself stays free
+of UI flags), the sim halts (the `!state.gameOver` guard on
 the accumulator), and "Play again" reloads the page — state is ephemeral,
 there's no save or seed system.

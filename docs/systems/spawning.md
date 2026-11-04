@@ -9,7 +9,7 @@ must keep up with.
 and one work, instantly active, in a region covering the **middle third** of
 the usable map (`margin`-inset) — or the left/right third when a level sets
 `spawn.seedBias` (Map 3 seeds on the right). The camera centres on the cluster
-on the first frame (`main.js` `_camInit`).
+on the first frame (`main.js` `camInit` — a module-local, not state).
 
 ## Cadence & type choice
 

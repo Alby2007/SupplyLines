@@ -77,7 +77,9 @@ const STEP = 1 / 60;
 // bolt on through opts: RL_FREIGHTTILES overrides the T1 weekly-tile rate
 // for probes / 0 ablates the mechanic for pre-mechanic checkpoint
 // evaluation, BOTNO<NAME> skips a subsystem for bisecting, BOTPHASE traces
-// update order
+// update order. rng is the per-run seeded draw (srand(seed)) — callers pass
+// it in so episodes stay reproducible without touching the global
+// Math.random
 const SKIP_ENV = {
   spawn: 'BOTNOSPAWN', economy: 'BOTNOECON', food: 'BOTNOFOOD',
   agents: 'BOTNOAGENTS', vehicles: 'BOTNOVEH',
@@ -90,8 +92,8 @@ const TICK_OPTS = {
     if (process.env.BOTPHASE) console.log(`t=${s.time.toFixed(2)} phase=${name}`);
   },
 };
-function tick(state, dt) {
-  simTick(state, dt, TICK_OPTS);
+function tick(state, dt, rng = null) {
+  simTick(state, dt, rng ? { ...TICK_OPTS, rng } : TICK_OPTS);
 }
 
 // ---- grid / roads ---------------------------------------------------------
@@ -634,11 +636,11 @@ function tryBus(state, log) {
 }
 
 // what the player would pick from a two-offer weekly choice
-function pickUpgrade(state, log) {
+function pickUpgrade(state, log, rng = Math.random) {
   const valid = UPGRADES.filter((u) => u.ok(state));
   const offers = [];
   while (offers.length < 2 && valid.length) {
-    offers.push(valid.splice(Math.floor(Math.random() * valid.length), 1)[0]);
+    offers.push(valid.splice(Math.floor(rng() * valid.length), 1)[0]);
   }
   if (!offers.length) { state.upgradePending = false; return; }
   const homesHungry = [...state.buildings.values()].some(
@@ -972,7 +974,7 @@ function postmortem(state, warn, arrivals) {
 // ---- run -----------------------------------------------------------------
 
 function run(seed, verbose) {
-  Math.random = srand(seed);
+  const rng = srand(seed);
   const state = createState();
   state.level = LEVEL;
   applyLevelFeatures(state);
@@ -992,10 +994,10 @@ function run(seed, verbose) {
 
   for (let i = 0; i < maxTicks && !state.gameOver; i++) {
     if (state.upgradePending) {
-      pickUpgrade(state, log); // sim pauses while the player chooses
+      pickUpgrade(state, log, rng); // sim pauses while the player chooses
       continue;
     }
-    tick(state, STEP);
+    tick(state, STEP, rng);
     arrivalSampleT -= STEP;
     if (arrivalSampleT <= 0) {
       arrivalSampleT = 1;

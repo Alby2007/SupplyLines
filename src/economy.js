@@ -46,7 +46,7 @@ export function servingStress(state, b) {
   return Math.min(1, s);
 }
 
-export function update(state, dt) {
+export function update(state, dt, rng = Math.random) {
   // the first motorway and roundabout arrive once week 3 is done — more come
   // from weekly picks (MM: they're the upgrade-menu road tools)
   if (!state.motorwayGranted && state.week >= CONFIG.motorways.unlockWeek) {
@@ -87,7 +87,7 @@ export function update(state, dt) {
         counts ??= presenceCounts(state);
         if ((counts.out.get(b.id) ?? 0) < CONFIG.homes.residents + (b.resBonus ?? 0)) {
           b.spawnClock =
-            CONFIG.commuters.interval * (1 + (Math.random() * 2 - 1) * CONFIG.commuters.jitter);
+            CONFIG.commuters.interval * (1 + (rng() * 2 - 1) * CONFIG.commuters.jitter);
           spawnAgent(state, b, 'person', personDestFor(b.color));
         }
       }

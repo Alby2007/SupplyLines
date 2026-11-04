@@ -77,16 +77,17 @@ function b(state, id, type, x, y) {           // minimal building stub
   let `nid()` allocate vehicles/agents; avoid colliding with stub ids.
 - `buildings` created by the stub lack `workers`/`stock` etc. — add the fields
   your path touches or you'll get `undefined`-arithmetic NaNs.
-- `sim.test.js` fuzz cases are seeded runs — keep them deterministic; don't
-  add `Math.random()` reliance without a seeded helper.
+- `sim.test.js` fuzz cases are seeded runs — keep them deterministic; draw
+  from the `rng` parameter (sim functions take `rng = Math.random`), never
+  raw `Math.random()`, inside seeded paths.
 - The suite is fast (~1s); a slow test is usually a `runTicks` count that's
   too high for the assertion — most arrivals need <10 sim-seconds.
 
 ## The autoplayer (`autoplay.mjs`)
 
 A headless bot that plays the **real** game — it imports the same sim modules
-and replicates `main.js`'s tick order, with `Math.random` replaced by a seeded
-RNG so runs are reproducible:
+and runs `src/tick.js`'s loop, passing a seeded `srand(seed)` rng through the
+sim (`opts.rng`) and its own decision draws so runs are reproducible:
 
 ```sh
 node autoplay.mjs --seed=1            # one run: postmortem + weekly timeline

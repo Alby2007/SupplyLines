@@ -14,8 +14,26 @@ FAST=0
 while true; do
   echo "[$(date '+%F %T')] launch (fast_crash_streak=$FAST)" >> "$LOG"
   start=$(date +%s)
-  "$PY" train.py "$@" >> "runs/$TAG.log" 2>&1
-  rc=$?
+  "$PY" train.py "$@" >> "runs/$TAG.log" 2>&1 &
+  pid=$!
+  # stall watchdog: the trainer rewrites latest.pt every iteration (~90s);
+  # a live process that stops checkpointing for 15min is a wedge — GPU
+  # queue hang, observed twice (one hung the desktop). Kill and count as
+  # a crash event so the run auto-recovers instead of burning hours.
+  CK="runs/$TAG/latest.pt"
+  while kill -0 $pid 2>/dev/null; do
+    # zombie children still pass kill -0 — don't mistake a natural exit for a stall
+    [ "$(awk '{print $3}' /proc/$pid/stat 2>/dev/null)" = "Z" ] && break
+    sleep 60
+    last_ck=$start
+    [ -f "$CK" ] && [ "$(stat -c %Y "$CK")" -gt "$last_ck" ] && last_ck=$(stat -c %Y "$CK")
+    if [ $(( $(date +%s) - last_ck )) -gt 900 ]; then
+      echo "[$(date '+%F %T')] stall: no checkpoint write >900s — killing $pid" >> "$LOG"
+      kill $pid 2>/dev/null; sleep 10; kill -9 $pid 2>/dev/null
+      break
+    fi
+  done
+  wait $pid; rc=$?
   el=$(( $(date +%s) - start ))
   echo "[$(date '+%F %T')] exited rc=$rc after ${el}s" >> "$LOG"
   # died under 5min after launch = crash loop; give up after 5 in a row

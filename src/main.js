@@ -8,12 +8,14 @@ import { initUI, updateHUD, showUpgrade, showGameOver } from './ui.js';
 const canvas = document.getElementById('game');
 // ?level=N picks the map — per-level CONFIG overrides must apply before
 // createState(), which reads CONFIG fields for initial values
-const level = parseInt(new URLSearchParams(location.search).get('level') ?? '1', 10) || 1;
+const params = new URLSearchParams(location.search);
+const level = parseInt(params.get('level') ?? '1', 10) || 1;
 applyLevelOverrides(level);
 const state = createState();
 state.level = level;
 applyLevelFeatures(state);
-window.__state = state; // live-state inspection for "why is X happening"
+// ?debug — live-state inspection for "why is X happening" (off by default)
+if (params.has('debug')) window.__state = state;
 const SURFACES = { 1: '#dce9cf', 2: '#f0dcae', 3: '#8fbe7d' }; // per-map ground
 canvas.style.background = SURFACES[state.level] ?? SURFACES[1];
 
@@ -60,6 +62,8 @@ const STEP = 1 / 60;
 let last = performance.now();
 let acc = 0;
 let upgradeShown = false;
+let gameOverShown = false;
+let camInit = false;
 
 function frame(now) {
   let dt = (now - last) / 1000;
@@ -77,14 +81,14 @@ function frame(now) {
     showUpgrade(state);
   }
   if (!state.upgradePending) upgradeShown = false;
-  if (state.gameOver && !state.gameOver.shown) {
-    state.gameOver.shown = true;
+  if (state.gameOver && !gameOverShown) {
+    gameOverShown = true;
     showGameOver(state);
   }
   updateCamera(state, dt); // camera pans even while paused
   // open on the seeded cluster, not the empty corner
-  if (!state._camInit && state.buildings.size) {
-    state._camInit = true;
+  if (!camInit && state.buildings.size) {
+    camInit = true;
     let cx = 0, cy = 0;
     for (const b of state.buildings.values()) { cx += b.x; cy += b.y; }
     cx /= state.buildings.size;
