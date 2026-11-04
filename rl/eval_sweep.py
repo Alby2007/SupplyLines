@@ -20,7 +20,10 @@ SUBSET = [124, 135, 140, 145, 146, 148, 150]
 LEVELS = [1, 2, 3] + SUBSET
 
 WEEKS = re.compile(r'weeks: min (\d+) median (\d+) max (\d+) mean ([\d.]+)')
-STARS = re.compile(r'mean ([\d.]+)')
+# anchored to the stars: line — a bare 'mean' search hits the weeks line first
+# (eval.py prints weeks before stars; every stars_mean written pre-fix was
+# actually weeks_mean, hence the >3 impossibilities in older eval JSONs)
+STARS = re.compile(r'stars:.*?mean ([\d.]+)')
 DEATHS = re.compile(r'deaths: (\{.*\})')
 
 

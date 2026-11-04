@@ -14,7 +14,9 @@ import re
 import subprocess
 from concurrent.futures import ProcessPoolExecutor
 
-NODE = os.path.expanduser('~/.local/node/bin/node')
+from vexp import _node_bin
+
+NODE = _node_bin()  # which('node') first, then ~/.local — same as the env client
 AUTOPLAY = os.path.join(os.path.dirname(__file__), '..', 'autoplay.mjs')
 MED = re.compile(r'weeks survived: min (\d+) median (\d+) max (\d+)')
 CAUSES = re.compile(r'death causes: (\{.*\})')
