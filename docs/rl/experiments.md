@@ -362,3 +362,71 @@ will be dominated by staffing — gating growth on an uncontrollable
 resource makes the gate a lottery, not a lever; (b) understaffed-death
 share is the cleanest attribution in the project so far; (c) T3 slots
 under T2 as the tool to fix prosperity dips once growth gates on health.
+
+## BC(bot): same-interface imitation baseline — VERDICT: imitation reaches the RL frontier
+
+Reviewer ask: a PPO-only curve needed one comparison point — BC the
+existing autoplayer as the "how far does pure imitation get" floor. It
+turned into a measurement of more than a floor.
+
+**Pipeline** (`bc_collect.py` / `bc_train.py` / `bot_eval.py`, worker
+`bcstep`): enum carries an `op` payload per candidate (road cells, line
+stops, demolish target, junction/special pos, upgrade idx). Each decision
+frame: enumerate → encode obs → snapshot road/line/junction state →
+`decide()` → state-diff → match ops to enum indices → tick. Frames with
+unmappable ops contribute only their mapped labels; unmappable ops are
+counted by kind — the vocabulary-thinness metric.
+
+**Two instrumentation findings fixed before data:**
+- Double-deal: `pickUpgrade` rolled a fresh 2-of-N offer instead of
+  scoring the pair the enum dealt — ~80% of upgrade ops "unmapped" as a
+  phantom (the bot does NOT cheat the offer system; all three paths do
+  the same 2-of-N deal). `pickUpgrade(state, log, rng, preset)` now
+  scores `state._offers` → 100% mapped, and the phantom roll stopped
+  consuming sim rng (real UI draws via Math.random).
+- Merge-phantoms: building through a junction deletes+creates edges —
+  diff read merges as demolishes. Fixed by cell-coverage check (demolish
+  = cells left bare).
+
+**Dataset**: 120 eps × train pool, calm+T1, 104,315 samples, memmap
+layout (`demo_{grid,glob,feats,mask,act}.npy` + `_meta.json`; end-only
+np.stack OOM-killed the first attempt — 105k fp16 grids ≈ 8GB doubled at
+stack time). Trained `bc.pt`: masked CE, 6 ep → top1 97.8%.
+
+**Vocabulary gap (post mask-feasibility fixes): ~2.5% of bot ops
+unmapped** — junction 74/76 (~97%, enum barely offers it), specials ~53%
+(gated placement), line ~37% (stop-sequence not in candidate set), road
+0%, upgrades 0%. Pre-fix phantom: ~27% (10.3k road "unmapped" were
+infeasible-enum noise — the enum offered roads buildRoad would reject).
+
+**Eval** (10 levels × 8 eps, argmax, calm+T1; med/mean):
+
+| level | bot | BC | T1-RL |
+|---|---|---|---|
+| L1 | 10/10.2 | 13/12.5 | 14/13.5 |
+| L2 | 11/11.5 | 10/10.5 | 9/9.2 |
+| L3 | 14/13.4 | 12/11.8 | 12/11.6 |
+| L124 | 10/10.0 | 13/13.0 | 15/13.6 |
+| L135 | 10/10.2 | 11/11.4 | 10/10.4 |
+| L140 | 10/11.1 | 15/13.4 | 14/11.9 |
+| L145 | 12/12.8 | 12/11.0 | 9/8.4 |
+| L146 | 10/10.6 | 10/10.5 | 15/11.6 |
+| L148 | 10/11.1 | 13/12.5 | 15/13.0 |
+| L150 | 12/11.6 | 13/11.1 | 10/10.0 |
+
+med-of-meds: **RL 13 > BC 12.5 > bot 10.5** · mean-of-means: **BC 11.8 >
+RL 11.3 ≈ bot 11.25** (bot_eval.json / eval_bc_heldout.json)
+
+**Reading:**
+- BC ≈ RL overall; each wins different maps. RL's distinct edge is
+  L146/L148 (+5 vs BC) — non-heuristic strategies PPO actually found.
+- BC > raw bot on 6/10 medians — the enum prunes the heuristic's wasteful
+  ops and argmax removes timing noise. Imitation through a cleaner
+  interface *improves* the teacher.
+- L145 (the labor-wall map): bot 12, BC 12, RL 9 — both heuristic
+  columns beat PPO there. RL's starvation-avoidance strategy appears to
+  sacrifice staffing play; the understaffed wall is a *learned-policy*
+  deficit, not an observability one (BC sees the same obs and cracks it).
+- Caveat: the post-fix bot is ~+2wk stronger than the artifact-era
+  baseline (mergeable-goal repair) — historical RL numbers compared to a
+  nerfed bot. The bar moved; future baselines use this bot_eval table.
