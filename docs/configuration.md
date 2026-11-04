@@ -75,6 +75,10 @@ motorways and transit lines can pass over.
 | `commuters.interval` | 5 | Avg seconds between departures per home |
 | `commuters.jitter` | 0.6 | `1 ± jitter` multiplier on the interval |
 | `homes.residents` | 3 | People "out" per home cap **and** carpool cap |
+| `homes.densifyCost` | 20 | Tiles for a permanent `resBonus` on one home (RL `densify`) |
+| `homes.densifyBonus` | 2 | Residents added per densify |
+| `homes.densifyCap` | 4 | Max `resBonus` a home can hold |
+| `homes.densifyRadius` | 800 | px — understaffed work must be within this of the home |
 | `work.shiftLen` | 18 | Seconds an office worker stays before heading home |
 | `food.shiftLen` | 180 | Seconds a farm/market worker stays |
 
@@ -141,6 +145,7 @@ Env overrides for ablation runs (all falsy-safe in the browser): `NOSTRESS`,
 | `yieldPatience` | 1.5 | s a yielded car waits before nosing in anyway |
 | `turnRadius` | 12 | px — corner fillet radius on vehicle drive paths |
 | `tilesStart` / `tilesPerWeek` / `tilesCap` | 40 / 18 / 99 | Road tile budget |
+| `roads.freightTiles` | 0.25 | Bonus tiles per crate delivered that week — endogenous budget (T1); `RL_FREIGHTTILES` env overrides / `=0` ablates |
 
 ## Motorways, roundabouts, traffic lights (`motorways.js`, `roundabouts.js`, `lights.js`, `vehicles.js`, `routing.js`)
 

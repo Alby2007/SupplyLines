@@ -47,6 +47,41 @@ fuse(emb=160) → `score` pointer head (emb+afd → 1 per action) + `value`.
 minibatch-512 update; MIOpen's weight-grad solver segfaults on this GPU —
 `RL_MIOPEN=1` opts back in, `RL_NATIVE_CONV=1` uses plain convs).
 
+## Stability guards (each one learned from a dead run)
+
+The full stack that keeps PPO from eating itself — every guard maps to a
+failure observed in the wild:
+
+- **log-ratio clamp ±20** — an extreme minibatch ratio `exp(logp−old)` once
+  overflowed to inf → NaN grads → NaN weights → `torch.save` persisted the
+  poison → every resume crashed in 12s (the "ROCm ghost" era).
+- **nskip** — minibatches with non-finite loss or grad-norm are skipped and
+  counted in the log line.
+- **save/load NaN guards** — `latest.pt` won't be written with non-finite
+  params; `--ckpt` load refuses poisoned tensors and says to restore a
+  snapshot.
+- **frozen return normalizer** — the v-head regresses z-scored returns;
+  σ/μ freeze from the first batch. A *live* normalizer fed σ back into
+  returns built from de-normalized `v` — loop gain √T, `rsd` went
+  23→1.2e12 in 20 iters.
+- **`emb.detach()` critic** — `self.value(emb.detach())`: TD divergence
+  (bootstrapped v chasing its own drift) used to ride the shared gradient
+  into the trunk and saturate logits (`ent`→0 twice). Detached, worst case
+  is a bad critic — never a corrupted actor.
+- **Huber value loss** — `smooth_l1_loss` bounds outlier gradients on the
+  critic's own weights.
+- **KL early-stop (0.03)** — the canonical guard that was missing longest:
+  without it a few bad minibatches move the policy far inside an epoch, and
+  the ±20 clamp then *masks* exactly the samples that should supply PPO's
+  braking signal. `klstop` in the log = the brake fired that iteration.
+
+Together they converted explosion into **erosion**: runs no longer crash —
+they converge slowly toward deterministic saturation (`ent`→0 over
+~300-500 iters) instead. Frozen-argmax checkpoints are genuinely strong
+(argmax play outscores sampled by ~3wk — the sampled-vs-argmax gap hid the
+policy's real ability), but a reproducible *stable climb* is still the open
+trainer problem.
+
 ## Throughput history (steps/sec, measured)
 
 | change | SPS |

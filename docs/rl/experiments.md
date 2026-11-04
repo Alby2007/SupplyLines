@@ -331,3 +331,34 @@ on held-out maps — evidence for the feedback-loop design pattern
 T3 worker demographics attacks the residual understaffing wall).
 Trainer stability remains the open problem: two strong artifacts now,
 both reached via saturation rather than a reproducible stable climb.
+
+## T3: densify — endogenous labor capacity (RUNNING)
+
+Second feedback-loop mechanic, attacking the residual wall T1 didn't
+touch: understaffing is still the #1 death link (L145 held at 9/8.4 in
+the T1 eval; understaffed-death share persists on every gap map).
+
+Mechanic: `densify` verb — 20 tiles permanently raises a home's resident
+cap +2 (max +4) when an understaffed work sits within ~20 cells. The
+capacity-verb version of the shuttle idea: bonus residents emit commuters
+forever, and worker triage routes them to hot workplaces. Design rule
+applied: capacity amortizes, relief doesn't. (Full dormitory building —
+player-placed worker housing — was rejected for v1: no placed-building
+verb exists; the home-resident lever tests the same endogenous-labor
+hypothesis at a fraction of the surface.)
+
+Run: commuter_it80 lineage again (consistent comparison vs the T1
+artifact), calm + T1 + densify live, 33-map train pool. Transfer padded
+score.0.weight (96,204)→(96,205) for the new slot.
+
+Verdict metrics: `dens` adoption in the acts mix · understaffed-death
+share in postmortems (the direct target) · held-out L145 (the map built
+to crack) and the 140/135/150 band · whether 'Food rotted at a farm'
+(freight-glut signature from the T1 eval) eases as staffing lets farms
+staff trucks.
+
+Sequencing rationale: T3 before T2 because (a) T2's prosperity metric
+will be dominated by staffing — gating growth on an uncontrollable
+resource makes the gate a lottery, not a lever; (b) understaffed-death
+share is the cleanest attribution in the project so far; (c) T3 slots
+under T2 as the tool to fix prosperity dips once growth gates on health.

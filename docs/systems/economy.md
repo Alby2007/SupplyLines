@@ -35,16 +35,24 @@ Every building (junctions included) tracks `waiting.length ≥ capacity`:
 
 Per home, `spawnClock` counts down (randomized 0..interval at placement):
 
-- On fire: retry in 1s. If `out < homes.residents` (3), spawn a person and set
-  `spawnClock = interval · (1 ± jitter)`. `out` comes from `presenceCounts` —
-  people anywhere other than home (waiting, riding, or on shift).
+- On fire: retry in 1s. If `out < homes.residents + resBonus` (3 + bonus),
+  spawn a person and set `spawnClock = interval · (1 ± jitter)`. `out` comes
+  from `presenceCounts` — people anywhere other than home (waiting, riding,
+  or on shift).
 - The residents cap is the real throttle on commuter supply — a home with
   everyone out produces nothing until somebody returns.
+- **Densify (T3)**: `resBonus` on a home permanently raises its cap — the
+  RL `densify` verb buys `+densifyBonus` residents for `densifyCost` tiles
+  when an understaffed work sits within `densifyRadius`. Capacity, not
+  relief: the bonus emits commuters forever.
 
 ## Weeks & upgrades (`main.js` + `ui.js`)
 
 - `weekT` accumulates; at `weekSeconds` (60): `week++`, `upgradePending = true`,
-  `+tilesPerWeek` road tiles (cap `tilesCap`).
+  `+tilesPerWeek` road tiles **plus `freightTiles × crates-delivered-that-week`**
+  (cap `tilesCap`). The freight term is the T1 endogenous budget — capability
+  scales with working freight, so the tile race is won by play rather than
+  lost to the calendar (`freightWeek0` tracks the per-week delta).
 - `upgradePending` pauses the sim and shows the modal: 2 random picks from the
   valid upgrade list (validity checked per upgrade — e.g., "Add a train"
   requires a line to exist).

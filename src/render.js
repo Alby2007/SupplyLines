@@ -618,7 +618,7 @@ function drawBuilding(ctx, state, b, counts) {
   // homes: residents currently at home, centered in the circle — an empty
   // circle means everyone's out
   if (b.type === 'home') {
-    const inHome = Math.max(0, CONFIG.homes.residents - (counts.out.get(b.id) ?? 0));
+    const inHome = Math.max(0, CONFIG.homes.residents + (b.resBonus ?? 0) - (counts.out.get(b.id) ?? 0));
     for (let i = 0; i < inHome; i++) {
       const px = b.x + (i - (inHome - 1) / 2) * 11;
       ctx.fillStyle = '#6b6560';

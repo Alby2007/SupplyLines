@@ -115,6 +115,10 @@ export const CONFIG = {
   walk: { speed: 34, catch: 66 },
   homes: {
     residents: 3,           // a house has at most this many people out at once
+    densifyCost: 20,        // tiles to permanently raise one home's resident cap
+    densifyBonus: 2,        // +residents (concurrent commuters) per densify
+    densifyCap: 4,          // max bonus residents a home can hold
+    densifyRadius: 800,     // px (~20 cells) — eligible when an understaffed work sits within this
   },
   work: {
     shiftLen: 18,           // seconds a worker stays on-site before commuting home

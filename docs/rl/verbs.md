@@ -98,10 +98,37 @@ cannibalized courier (2.3→1.8 disp/ep) — an inert verb taxing a working one.
 Retired via `RL_SHUTTLE` env gate (enum off by default; sim code kept).
 Checkpoint: `runs/genobs/shuttle_it115.pt`.
 
+## `reconnect` (verb #4) — structural repair, adopted ~22%
+
+The first *amortizing* verb: targets buildings already touching roads but
+disconnected from the serving component (topology gaps, not worker
+scarcity), computes a whole-path bridge to the service component, and
+permanently repairs the connectivity. Unlike courier/shuttle it pays once
+and fixes forever — crisis count amortizes instead of re-treading.
+
+**Verdict: retained** — ~22% adoption with a matched +0.3-0.9wk lift on
+the maps where topology gaps were the binding constraint. Gated by
+`RL_RECONNECT` (default on; `=0` ablates).
+
+## `densify` (verb #5) — permanent worker capacity (T3, in progress)
+
+The endogenous-labor lever: spend `homes.densifyCost` tiles to raise one
+home's resident cap by `densifyBonus` (+2, capped at `densifyCap` +4)
+when an understaffed workplace sits within `densifyRadius` (~20 cells).
+Each bonus resident emits commuters forever — the *capacity* version of
+what shuttle's relief couldn't deliver, now aimed at the worker side of
+the conveyor where understaffing is the residual death cause.
+
+Design note: the shuttle lesson applied — capacity verbs amortize, relief
+verbs don't. `resBonus` lives on the building and feeds the
+`economy.js` resident-cap check; sim-side it's a real mechanic (browser
+HUD shows the raised cap). Gated by `RL_DENSIFY` (default on; `=0`
+ablates for pre-densify checkpoints).
+
 ## Adding a verb (the checklist)
 
-1. `feat` slot: `TYPE_IDX` → a free one-hot (`hire`=40, `courier`=41; 42-43
-   free).
+1. `feat` slot: `TYPE_IDX` → a free one-hot (`hire`=40, `courier`=41,
+   `shuttle`=42, `reconnect`=43, `densify`=44; `afd`=45, tail free).
    Growing `afd` pads `score.0.weight` on `--transfer` — learned action
    preferences survive, the new verb's columns start fresh.
 2. `enumerate()`: candidates + `push({type, ...feats}, apply, desc)` — masked

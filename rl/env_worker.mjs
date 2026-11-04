@@ -98,14 +98,14 @@ const ROWS = Math.floor(CONFIG.map.height / CONFIG.grid.cell);
 // 40-wide grid lands in the left half and the level one-hot in globals tells
 // the policy which map it's on
 const OBSCOLS = Math.max(COLS, 80), OBSROWS = Math.max(ROWS, 32);
-const CH = 25, GD = 37, AFD = 44, MAXA = 80; // afd slots 41-43 reserved for future verbs
+const CH = 25, GD = 37, AFD = 45, MAXA = 80; // afd slots 41-44 in use; tail free
 
 // ---- action enumeration ---------------------------------------------------
 
 // type one-hots live at their slot index; 33/34 land in the tail that
 // upgrades (22..32) leave free, so checkpoints trained before demolition and
 // junctions existed still read every old action identically
-const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41, shuttle: 42, reconnect: 43 };
+const TYPE_IDX = { noop: 0, connect: 1, roadlink: 2, line: 3, motorway: 4, roundabout: 5, light: 6, upgrade: 7, demolish: 33, junction: 34, hire: 40, courier: 41, shuttle: 42, reconnect: 43, densify: 44 };
 
 function meterOf(b) {
   if (b.type === 'work') return Math.max(0, b.demandT / CONFIG.demand.limit);
@@ -656,6 +656,51 @@ function enumerate(state) {
     }
   }
 
+  // densify: permanent worker capacity — spend tiles to raise a home's
+  // resident cap where understaffed works sit nearby. The capacity verb
+  // shuttle's relief couldn't be: each bonus resident emits commuters
+  // forever, and the triage rules send them where demand runs hot.
+  if (DENSIFY) {
+    const cost = CONFIG.homes.densifyCost;
+    if (state.roadTiles >= cost) {
+      const needy = [];
+      for (const b of state.buildings.values())
+        if (b.active && understaffed(b)) needy.push(b);
+      if (needy.length) {
+        const homes = [];
+        for (const h of state.buildings.values()) {
+          if (h.type !== 'home' || !h.active) continue;
+          if ((h.resBonus ?? 0) >= CONFIG.homes.densifyCap) continue;
+          let best = Infinity;
+          for (const w of needy) {
+            const d = Math.hypot(h.x - w.x, h.y - w.y);
+            if (d < best) best = d;
+          }
+          if (best <= CONFIG.homes.densifyRadius) homes.push({ h, best });
+        }
+        homes.sort((a, b) => a.best - b.best);
+        for (const { h, best } of homes.slice(0, 6)) {
+          push(
+            { type: 'densify', color: h.color,
+              costFrac: cost / Math.max(1, state.roadTiles),
+              dist: best, stops: (h.resBonus ?? 0) },
+            () => {
+              if (state.roadTiles < cost) return 0;
+              if ((h.resBonus ?? 0) >= CONFIG.homes.densifyCap) return 0;
+              const still = [...state.buildings.values()].some((w) =>
+                w.active && understaffed(w) &&
+                Math.hypot(h.x - w.x, h.y - w.y) <= CONFIG.homes.densifyRadius);
+              if (!still) return 0;
+              state.roadTiles -= cost;
+              h.resBonus = (h.resBonus ?? 0) + CONFIG.homes.densifyBonus;
+              return 0.15;
+            },
+            `densify home#${h.id} +${CONFIG.homes.densifyBonus} residents (${best.toFixed(0)}u to work)`);
+        }
+      }
+    }
+  }
+
   // shuttle: paid escort carrying a worker home→work cross-country — the
   // staffing-side analog of courier for buildings the road can't reach.
   // Masked to genuinely understaffed/hot buildings; the worker arrives as a
@@ -1100,6 +1145,8 @@ const COURIER = process.env.RL_COURIER !== '0';
 // RL_RECONNECT=0 suppresses reconnect (stranded-component bridging) for
 // ablation against checkpoints that never saw it
 const RECONNECT = process.env.RL_RECONNECT !== '0';
+// RL_DENSIFY=0 suppresses densify (permanent home-capacity verb) for ablation
+const DENSIFY = process.env.RL_DENSIFY !== '0';
 
 // RLTIME=1 → per-phase ms totals on stderr at close; hrtime is ~100ns so the
 // counters stay on unconditionally and only printing is gated

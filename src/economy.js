@@ -85,7 +85,7 @@ export function update(state, dt) {
       if (b.spawnClock <= 0) {
         b.spawnClock = 1; // retry soon — a home is capped at `residents` people out
         counts ??= presenceCounts(state);
-        if ((counts.out.get(b.id) ?? 0) < CONFIG.homes.residents) {
+        if ((counts.out.get(b.id) ?? 0) < CONFIG.homes.residents + (b.resBonus ?? 0)) {
           b.spawnClock =
             CONFIG.commuters.interval * (1 + (Math.random() * 2 - 1) * CONFIG.commuters.jitter);
           spawnAgent(state, b, 'person', personDestFor(b.color));

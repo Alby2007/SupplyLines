@@ -44,12 +44,13 @@ a map distribution instead of memorizing three layouts.
 
 ## Action space
 
-Up to `MAXA=80` enumerated, masked actions per step; `afd=44` features each
+Up to `MAXA=80` enumerated, masked actions per step; `afd=45` features each
 (type one-hot, color, cost fractions, meters, distances, subtype flags —
-layout in `feat()`, slots 41-43 reserved for future verbs). Twelve verbs:
+layout in `feat()`, slots 41-44 in use). Verbs:
 `noop, connect, roadlink, line, motorway, roundabout, light, upgrade,
-demolish, junction, hire` (+ `bus` as a line subtype). See
-[verbs.md](verbs.md).
+demolish, junction, hire, courier, shuttle, reconnect, densify`
+(+ `bus` as a line subtype; `shuttle` is enum-gated off by default).
+See [verbs.md](verbs.md).
 
 During `upgradePending` the action space is *just* the upgrade lottery —
 same two-offer process the human sees.
