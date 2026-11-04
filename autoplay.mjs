@@ -163,14 +163,14 @@ function mainComponentCells(state, roadIdx) {
   return componentCells(roadIdx, comp, best);
 }
 
-// node ids on the main component — served() only checks roadNodeId, so a
-// building anchored to a stub still reads "connected" when the stub is an
-// island the planner mistook for the network
-function mainComponentNodes(state, comp, best) {
-  if (best == null) return null;
+// node ids on a component — served() only checks roadNodeId, so a building
+// anchored to a stub still reads "connected" when the stub is an island the
+// planner mistook for the network
+function componentNodes(state, comp, cid) {
+  if (cid == null) return null;
   const out = new Set();
   for (const n of state.roadNodes.values()) {
-    if (n.edges.length && comp.get(n.edges[0]) === best) out.add(n.id);
+    if (n.edges.length && comp.get(n.edges[0]) === cid) out.add(n.id);
   }
   return out;
 }
@@ -179,11 +179,11 @@ function mainComponentNodes(state, comp, best) {
 // a goal cell whose centre sits >snap from every node/edge lands the draw
 // beside the network instead of on it, orphaning the building on a stub that
 // reads "connected". Keep only goal cells a draw can actually merge into.
-function mergeableGoalCells(state, goal, mainNodes) {
+function mergeableGoalCells(state, goal, nodes) {
   if (!goal) return goal;
   const nodeCells = new Map();
   for (const n of state.roadNodes.values()) {
-    if (!mainNodes.has(n.id)) continue;
+    if (!nodes?.has(n.id)) continue; // null set → edge-proximity check only
     const k = cellKey(cellOf(n));
     (nodeCells.get(k) ?? nodeCells.set(k, []).get(k)).push(n);
   }
@@ -340,7 +340,7 @@ function tryConnect(state, b, log) {
     cells = cachedPlan(state, `connect:${b.id}`, () => {
       const { comp, best } = edgeComponents(state);
       const goal = mergeableGoalCells(
-        state, componentCells(roadIdx, comp, best), mainComponentNodes(state, comp, best));
+        state, componentCells(roadIdx, comp, best), componentNodes(state, comp, best));
       return pathToRoad(state, own, roadIdx, blockedCells(state), goal);
     });
     if (process.env.BOTTRACE) console.log(`pathToRoad done ${b.type}#${b.id} cells=${cells?.length}`);
@@ -814,7 +814,7 @@ function decide(state, log) {
     const roadIdx = roadCellIndex(state);
     if (roadIdx.size) {
       const { comp, best } = edgeComponents(state);
-      const mainNodes = mainComponentNodes(state, comp, best);
+      const mainNodes = componentNodes(state, comp, best);
       const safeGoal = mainNodes &&
         mergeableGoalCells(state, componentCells(roadIdx, comp, best), mainNodes);
       if (safeGoal) {
@@ -1075,7 +1075,7 @@ export {
   junctionJoin, insertStop, newLine, onLine, avgDist, backboneWanted,
   reachable, tryLines, pickUpgrade, junctionPressure, tryShortcut,
   trySpecials, decide, postmortem, run, cachedPlan,
-  edgeComponents, componentCells,
+  edgeComponents, componentCells, componentNodes, mergeableGoalCells,
 };
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

@@ -35,9 +35,10 @@ import { rushStatus } from '../src/economy.js';
 import { mapParams } from '../src/mapgen.js';
 import * as readline from 'node:readline';
 import {
-  srand, tick, served, blockedCells, mainComponentCells, pathToRoad,
+  srand, tick, served, blockedCells, pathToRoad,
   onLine, reachable, junctionPressure, newLine, cachedPlan,
   decide, pickUpgrade, edgeComponents, componentCells,
+  componentNodes, mergeableGoalCells,
 } from '../autoplay.mjs';
 
 const arg = (k, d) => {
@@ -158,6 +159,10 @@ function connectPlan(state, b, roadIdx, blocked, goal) {
     if (cells.some((c) => blocked.has(cellKey(c)) || state.water?.has(cellKey(c)))) {
       const g = new Map(buildingCells(other).map((c) => [cellKey(c), []]));
       cells = pathToRoad(state, own, g, blocked) ?? cells;
+      // pathToRoad never returns blocked cells, so blocked here means the
+      // raw chord is still in hand — it crosses a junction, buildRoad
+      // rejects, the mask would offer a connect that cannot succeed
+      if (cells.some((c) => blocked.has(cellKey(c)))) return null;
     }
     return cells;
   }
@@ -316,7 +321,15 @@ function lineCandidates(state) {
       const t = Math.hypot(d.x - b.x, d.y - b.y);
       if (t < dd) { dd = t; dBest = d; }
     }
-    if (dBest) out.push({ stops: [b.id, dBest.id], why: 'rescue', rescue: true, color: a.color });
+    if (dBest) {
+      // addLine colours by first coloured stop — if that isn't the stranded
+      // agent's colour the built line can't board them (agents ride only
+      // their own colour, routing.js lineColor filter) → don't offer a
+      // doomed rescue
+      const lc = [b.color, dBest.color].find((c) => c != null) ?? null;
+      if (lc === a.color)
+        out.push({ stops: [b.id, dBest.id], why: 'rescue', rescue: true, color: a.color });
+    }
   }
   const pairs = [];
   const foodEra = farms.some((f) => f.active);
@@ -403,7 +416,11 @@ function enumerate(state) {
   const beforeConnects = acts.length; // noop masked whenever connects exist
 
   const blocked = blockedCells(state);
-  const goal = roadIdx.size ? mainComponentCells(state, roadIdx) : null;
+  // same mergeable-only goal set tryConnect uses — raw component cells let a
+  // plan land beside the network and stub the building onto a stranded island
+  const { comp, best } = roadIdx.size ? edgeComponents(state) : {};
+  const goal = best == null ? null : mergeableGoalCells(
+    state, componentCells(roadIdx, comp, best), componentNodes(state, comp, best));
 
   // connect each unserved building (road drawn by the shared pathing) —
   // capped so a sprawled city can't crowd every other action type off MAXA
@@ -467,11 +484,20 @@ function enumerate(state) {
   // Goal set is the component(s) that can actually serve them, so the
   // Dijkstra draws the cheapest bridge between islands, not just to main.
   if (RECONNECT && roadIdx.size) {
-    const { comp } = edgeComponents(state);
     const compCache = new Map();
     const cellsOfComp = (cid) => {
       if (!compCache.has(cid)) compCache.set(cid, componentCells(roadIdx, comp, cid));
       return compCache.get(cid);
+    };
+    const mergeCache = new Map();
+    const mergeableOfComp = (cid) => {
+      // reconnect goals must land where a draw can actually merge into the
+      // serving component — same snap-radius check as the main-net goal
+      if (!mergeCache.has(cid)) {
+        mergeCache.set(cid, mergeableGoalCells(
+          state, cellsOfComp(cid), componentNodes(state, comp, cid)));
+      }
+      return mergeCache.get(cid);
     };
     const compOf = (b) => {
       for (const c of buildingCells(b)) {
@@ -481,7 +507,7 @@ function enumerate(state) {
       return null;
     };
     const goalInto = (goal, b, cid) => {
-      if (cid != null) for (const [k, v] of cellsOfComp(cid)) goal.set(k, v);
+      if (cid != null) for (const [k, v] of mergeableOfComp(cid)) goal.set(k, v);
       for (const c of buildingCells(b)) goal.set(cellKey(c), []); // unroaded target: land adjacent
     };
     const reconCands = [];
@@ -1267,7 +1293,8 @@ function doReset(seed, warm = 0) {
     setLevel(snap.snap.level); // the episode continues on the snapshot's map
     state = deepClone(snap.snap);
     steps = 0;
-    epActs = {}; epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
+    epActs = {}; epActsFail = {};
+    epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
     epRestored = snap.week;
     lastSnapWeek = state.week;
     prevExcess = excessPressure(state);
@@ -1282,7 +1309,8 @@ function doReset(seed, warm = 0) {
   state.level = lvl;
   applyLevelFeatures(state);
   steps = 0;
-  epActs = {}; epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
+  epActs = {}; epActsFail = {};
+  epTiles = 0; epBridges = 0; epUpgrades = []; epOffers = [];
   for (let i = 0; i < 30; i++) tick(state, STEP, rng); // let the seed cluster open
   // reverse-curriculum warm start: the heuristic bot pre-plays a random
   // prefix so episodes reach the states runs actually die in — agent and
@@ -1309,7 +1337,7 @@ function doReset(seed, warm = 0) {
 
 function respond(reward, done) {
   let s = t0();
-  const acts = enumerate(state);
+  const acts = done ? [] : enumerate(state); // terminal obs is discarded client-side
   add('enum', s);
   const info = {
     week: state.week, time: +state.time.toFixed(1),
@@ -1354,16 +1382,23 @@ let pending = null; // acts from the last respond()
 
 // per-episode metrics — feed episodes.jsonl so the action histogram is a
 // visible collapse/emergence detector, not a guess
-let epActs = {}, epTiles = 0, epBridges = 0, epUpgrades = [], epOffers = [];
+let epActs = {}, epActsFail = {},
+    epTiles = 0, epBridges = 0, epUpgrades = [], epOffers = [];
 
 function doStep(aIdx) {
-  const acts = pending ?? enumerate(state);
+  if (!pending) throw new Error(
+    'step with no live action frame (pre-reset or post-bcstep) — reset first');
+  const acts = pending;
   steps++;
   let bonus = 0;
   if (aIdx >= 0 && aIdx < acts.length) {
     const rt0 = state.roadTiles, br0 = state.bridges ?? 0;
     try { bonus = acts[aIdx].apply() || 0; } catch (e) { /* bad apply = wasted action */ }
     epActs[acts[aIdx].type] = (epActs[acts[aIdx].type] ?? 0) + 1;
+    // a zero-returning apply did nothing (buildRoad rejected, slot race) —
+    // count it apart so "actions taken" doesn't read as "actions succeeded"
+    if (!bonus && acts[aIdx].type !== 'noop')
+      epActsFail[acts[aIdx].type] = (epActsFail[acts[aIdx].type] ?? 0) + 1;
     epTiles += rt0 - state.roadTiles;
     epBridges += br0 - (state.bridges ?? 0);
   }
@@ -1412,6 +1447,7 @@ function doStep(aIdx) {
     r.info.stars = stars;
     r.info.mapp = mapParams(state.level).map((v) => +v.toFixed(4));
     r.info.acts = { ...epActs };
+    if (Object.keys(epActsFail).length) r.info.actsFailed = { ...epActsFail };
     r.info.tilesSpent = epTiles;
     r.info.bridgesSpent = epBridges;
     r.info.lines = state.lines.size;

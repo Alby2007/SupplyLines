@@ -404,7 +404,9 @@ function courierArrive(state, v) {
   const home = state.buildings.get(v.target);
   if (home?.active) {
     home.hungerT = 0;
-    home.fedAt = state.time;
+    // courierFedAt, not fedAt — fedAt marks chain deliveries so the RL
+    // fedThisStep shaping term doesn't credit the relief-valve bypass
+    home.courierFedAt = state.time;
     state.courierFed = (state.courierFed || 0) + 1;
   }
 }
