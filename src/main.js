@@ -1,10 +1,6 @@
 import { CONFIG, applyLevelOverrides } from './config.js';
 import { createState, applyLevelFeatures } from './state.js';
-import * as spawn from './spawn.js';
-import * as economy from './economy.js';
-import * as agents from './agents.js';
-import * as vehicles from './vehicles.js';
-import * as food from './food.js';
+import { tick } from './tick.js';
 import { initInput, getDraft, getRoadDraft, getTool, getHover, updateCamera } from './input.js';
 import { draw, drawMinimap } from './render.js';
 import { initUI, updateHUD, showUpgrade, showGameOver } from './ui.js';
@@ -65,25 +61,6 @@ let last = performance.now();
 let acc = 0;
 let upgradeShown = false;
 
-function tick(dt) {
-  state.time += dt;
-  state.weekT += dt;
-  if (state.weekT >= CONFIG.weekSeconds) {
-    state.weekT = 0;
-    state.week++;
-    state.upgradePending = true;
-    const fDelta = state.freightDelivered - (state.freightWeek0 ?? 0);
-    state.roadTiles = Math.min(CONFIG.roads.tilesCap,
-      state.roadTiles + CONFIG.roads.tilesPerWeek + (CONFIG.roads.freightTiles ?? 0) * fDelta);
-    state.freightWeek0 = state.freightDelivered;
-  }
-  spawn.update(state, dt);
-  economy.update(state, dt);
-  food.update(state, dt);
-  agents.update(state, dt);
-  vehicles.update(state, dt);
-}
-
 function frame(now) {
   let dt = (now - last) / 1000;
   last = now;
@@ -91,7 +68,7 @@ function frame(now) {
   if (!state.paused && !state.gameOver && !state.upgradePending) {
     acc += dt * state.speed * 0.5; // 1x = half-pace, 2x = the original speed
     while (acc >= STEP) {
-      tick(STEP);
+      tick(state, STEP);
       acc -= STEP;
     }
   }

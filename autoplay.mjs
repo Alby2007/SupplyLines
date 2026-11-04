@@ -14,10 +14,8 @@
 
 import { CONFIG, applyLevelOverrides } from './src/config.js';
 import { createState, applyLevelFeatures } from './src/state.js';
-import * as spawn from './src/spawn.js';
+import { tick as simTick } from './src/tick.js';
 import * as economy from './src/economy.js';
-import * as food from './src/food.js';
-import * as agents from './src/agents.js';
 import * as vehicles from './src/vehicles.js';
 import { UPGRADES } from './src/ui.js';
 import { buildRoad, roadCellCost, roadCellIndex, bridgeCost } from './src/roads.js';
@@ -75,32 +73,25 @@ function srand(seed) {
 
 const STEP = 1 / 60;
 
-// the real game tick — mirrors main.js tick() exactly (1× pace)
+// the real game tick — src/tick.js shared with main.js (1× pace). Env flags
+// bolt on through opts: RL_FREIGHTTILES overrides the T1 weekly-tile rate
+// for probes / 0 ablates the mechanic for pre-mechanic checkpoint
+// evaluation, BOTNO<NAME> skips a subsystem for bisecting, BOTPHASE traces
+// update order
+const SKIP_ENV = {
+  spawn: 'BOTNOSPAWN', economy: 'BOTNOECON', food: 'BOTNOFOOD',
+  agents: 'BOTNOAGENTS', vehicles: 'BOTNOVEH',
+};
+const TICK_OPTS = {
+  freightRate: () => (process.env.RL_FREIGHTTILES != null
+    ? +process.env.RL_FREIGHTTILES : null),
+  skip: (name) => !!process.env[SKIP_ENV[name]],
+  phase: (s, name) => {
+    if (process.env.BOTPHASE) console.log(`t=${s.time.toFixed(2)} phase=${name}`);
+  },
+};
 function tick(state, dt) {
-  state.time += dt;
-  state.weekT += dt;
-  if (state.weekT >= CONFIG.weekSeconds) {
-    state.weekT = 0;
-    state.week++;
-    state.upgradePending = true;
-    // freight-linked budget (T1): weekly crates earn bonus tiles —
-    // RL_FREIGHTTILES overrides the rate for probes / 0 ablates the
-    // mechanic for pre-mechanic checkpoint evaluation
-    const frate = process.env.RL_FREIGHTTILES != null
-      ? +process.env.RL_FREIGHTTILES : (CONFIG.roads.freightTiles ?? 0);
-    const fDelta = state.freightDelivered - (state.freightWeek0 ?? 0);
-    state.roadTiles = Math.min(CONFIG.roads.tilesCap,
-      state.roadTiles + CONFIG.roads.tilesPerWeek + frate * fDelta);
-    state.freightWeek0 = state.freightDelivered;
-  }
-  const PH = process.env.BOTPHASE
-    ? (name) => { if (name) console.log(`t=${state.time.toFixed(2)} phase=${name}`); }
-    : () => {};
-  if (!process.env.BOTNOSPAWN) { PH('spawn'); spawn.update(state, dt); }
-  if (!process.env.BOTNOECON) { PH('economy'); economy.update(state, dt); }
-  if (!process.env.BOTNOFOOD) { PH('food'); food.update(state, dt); }
-  if (!process.env.BOTNOAGENTS) { PH('agents'); agents.update(state, dt); }
-  if (!process.env.BOTNOVEH) { PH('vehicles'); vehicles.update(state, dt); }
+  simTick(state, dt, TICK_OPTS);
 }
 
 // ---- grid / roads ---------------------------------------------------------

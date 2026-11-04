@@ -106,7 +106,9 @@ acc += dt * state.speed * 0.5;   // 1x = half the "natural" pace
 while (acc >= STEP) tick(STEP);
 ```
 
-`tick(dt)` order matters:
+`tick(state, dt)` lives in `src/tick.js`, shared verbatim by `main.js` and
+the headless drivers (`autoplay.mjs` → `rl/env_worker.mjs`, which bolt on
+their env flags through `opts`). Order matters:
 
 ```js
 state.time += dt; state.weekT += dt;  // clock first
