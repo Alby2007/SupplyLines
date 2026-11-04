@@ -159,7 +159,13 @@ class VecEnv:
         done_ix = [i for i, m in enumerate(msgs) if m['done']]
         for i in done_ix:
             infos[i]['episode'] = dict(msgs[i]['info'])
-            infos[i]['truncated'] = not msgs[i]['info'].get('reason')
+            truncated = not msgs[i]['info'].get('reason')
+            infos[i]['truncated'] = truncated
+            infos[i]['episode']['truncated'] = truncated
+            if truncated:
+                # time-cap isn't death — GAE bootstraps V at this terminal obs,
+                # which the auto-reset below overwrites in place; stash a copy
+                infos[i]['term_obs'] = {k: obs[k][i].copy() for k in obs}
             ws[i].send_reset(int(self._seeds(1)[0]), self.warm)
         for i in done_ix:
             rm = self._pack([ws[i].recv()])

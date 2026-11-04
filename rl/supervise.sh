@@ -16,19 +16,24 @@ while true; do
   start=$(date +%s)
   "$PY" train.py "$@" >> "runs/$TAG.log" 2>&1 &
   pid=$!
-  # stall watchdog: the trainer rewrites latest.pt every iteration (~90s);
-  # a live process that stops checkpointing for 15min is a wedge — GPU
-  # queue hang, observed twice (one hung the desktop). Kill and count as
-  # a crash event so the run auto-recovers instead of burning hours.
+  # stall watchdog: the trainer touches runs/<tag>/heartbeat every
+  # iteration (~1-3min even at degraded SPS); >10min without a beat OR a
+  # checkpoint = wedge — GPU queue hang, observed twice. latest.pt is a
+  # secondary signal only: it lands every 20 iters (~10-18min at typical
+  # sps), so keying on it alone false-positive-kills any run below
+  # ~365 env-steps/s — kill→restart→<20 iters→kill, forever.
+  HB="runs/$TAG/heartbeat"
   CK="runs/$TAG/latest.pt"
   while kill -0 $pid 2>/dev/null; do
     # zombie children still pass kill -0 — don't mistake a natural exit for a stall
     [ "$(awk '{print $3}' /proc/$pid/stat 2>/dev/null)" = "Z" ] && break
     sleep 60
     last_ck=$start
-    [ -f "$CK" ] && [ "$(stat -c %Y "$CK")" -gt "$last_ck" ] && last_ck=$(stat -c %Y "$CK")
-    if [ $(( $(date +%s) - last_ck )) -gt 900 ]; then
-      echo "[$(date '+%F %T')] stall: no checkpoint write >900s — killing $pid" >> "$LOG"
+    for f in "$HB" "$CK"; do
+      [ -f "$f" ] && [ "$(stat -c %Y "$f")" -gt "$last_ck" ] && last_ck=$(stat -c %Y "$f")
+    done
+    if [ $(( $(date +%s) - last_ck )) -gt 600 ]; then
+      echo "[$(date '+%F %T')] stall: no heartbeat/checkpoint >600s — killing $pid" >> "$LOG"
       kill $pid 2>/dev/null; sleep 10; kill -9 $pid 2>/dev/null
       break
     fi

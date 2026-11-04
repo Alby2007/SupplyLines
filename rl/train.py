@@ -59,9 +59,11 @@ def parse():
 def main():
     args = parse()
     torch.manual_seed(args.seed)
+    np.random.seed(args.seed)  # eps-greedy draws + minibatch shuffle order
     dev = torch.device(args.device)
     run_dir = os.path.join(os.path.dirname(__file__), 'runs', args.tag)
     os.makedirs(run_dir, exist_ok=True)
+    hb_path = os.path.join(run_dir, 'heartbeat')
 
     # --levels is a pool string passed straight to workers (i.i.d. per-episode
     # levels); a bare --level int still fixes every worker to one map
@@ -117,9 +119,12 @@ def main():
     b_val = np.zeros((T, N), np.float32)
     b_rew = np.zeros((T, N), np.float32)
     b_done = np.zeros((T, N), np.bool_)
+    b_trunc = np.zeros((T, N), np.bool_)   # done via MAX_SECONDS cap, not death
+    b_tval = np.zeros((T, N), np.float32)  # critic V at the cap's terminal obs
 
     buf = dict(grid=b_grid, glob=b_glob, feats=b_feats, mask=b_mask, act=b_act,
-               logp=b_logp, val=b_val, rew=b_rew, done=b_done)
+               logp=b_logp, val=b_val, rew=b_rew, done=b_done,
+               trunc=b_trunc, tval=b_tval)
     obs_g = env.split(env.reset())
     ep_stats = []
     t_start = time.time()
@@ -155,9 +160,21 @@ def main():
                         logp = dist.log_prob(torch.as_tensor(na, device=dev))
             return na, logp.cpu().numpy(), (v * ret_sd + ret_mu).cpu().numpy()
 
+        # value-only forward for terminal-obs bootstraps — separate from
+        # `policy` so it consumes no np.random draws (eps-greedy) and doesn't
+        # perturb the rollout's RNG stream for a handful of cap hits
+        def vfn(o):
+            g = torch.as_tensor(o['grid'], device=dev).float()
+            gl = torch.as_tensor(o['glob'], device=dev)
+            f = torch.as_tensor(o['feats'], device=dev).float()
+            m = torch.as_tensor(o['mask'], device=dev)
+            with torch.no_grad():
+                _, v = net(g, gl, f, m)
+            return (v * ret_sd + ret_mu).cpu().numpy()
+
         # steps are stored against the state they were taken FROM (s_t, a_t, r_t);
         # groups of envs overlap each other's sims with the policy forward
-        eps_done = collect(env, policy, buf, obs_g, T)
+        eps_done = collect(env, policy, vfn, buf, obs_g, T)
         for e in eps_done:
             e['iter'] = it
         ep_stats.extend(eps_done)
@@ -176,7 +193,12 @@ def main():
         nv = (nextv * ret_sd + ret_mu).cpu().numpy()
         for t in reversed(range(T)):
             nonterm = 1.0 - b_done[t].astype(np.float32)
-            delta = b_rew[t] + args.gamma * nv * nonterm - b_val[t]
+            # a time-cap end still has future value: bootstrap the critic's own
+            # V at the terminal obs (tval) instead of zeroing it like a death.
+            # nonterm still masks the lastgae carry — the next stored step is a
+            # new episode either way
+            nvstep = nv * nonterm + b_tval[t] * b_trunc[t]
+            delta = b_rew[t] + args.gamma * nvstep - b_val[t]
             lastgae = delta + args.gamma * args.lam * nonterm * lastgae
             adv[t] = lastgae
             nv = b_val[t]
@@ -256,6 +278,7 @@ def main():
         if it % 5 == 0 or it == 1:
             recent = ep_stats[-30:]
             wks = [e['week'] for e in recent]
+            tr = [e['truncated'] for e in recent]
             dr = [e['delivered'] for e in recent]
             # action mix across recent episodes — a healthy policy diversifies
             # into lines/specials as the city grows; ~all 'connect' is collapse
@@ -269,7 +292,8 @@ def main():
             sps = int(step_total / (time.time() - t_start))
             print(f'it {it:4d} | sps {sps:5d} | eps {len(ep_stats):4d} | warm {env.warm:5.0f}s | '
                   f'weeks avg {np.mean(wks) if wks else 0:.1f} max {max(wks) if wks else 0} | '
-                  f'del {np.mean(dr) if dr else 0:.0f} | acts {astr} | '
+                  f'del {np.mean(dr) if dr else 0:.0f} | tr {np.mean(tr) if tr else 0:.0%} | '
+                  f'acts {astr} | '
                   f'pl {pl/max(nb,1):.3f} vl {vl/max(nb,1):.3f} ent {el/max(nb,1):.3f} rsd {ret_sd:.1f}'
                   + (f' nskip {nskip}' if nskip else '')
                   + (' klstop' if klstop else ''), flush=True)
@@ -284,6 +308,11 @@ def main():
                 torch.save(net.state_dict(), os.path.join(run_dir, 'latest.pt'))
             else:
                 print(f'it {it}: non-finite weights — latest.pt save skipped', flush=True)
+        # liveness beat every iteration — supervise.sh's stall watchdog keys on
+        # this, NOT latest.pt (a 20-iter save gap makes slow runs look wedged
+        # and zombie-loops them: kill → restart → still <20 iters → kill again)
+        open(hb_path, 'a').close()
+        os.utime(hb_path, None)
 
     if all(p.isfinite().all() for p in net.parameters()):
         torch.save(net.state_dict(), os.path.join(run_dir, 'latest.pt'))

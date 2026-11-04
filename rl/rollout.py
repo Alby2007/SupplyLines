@@ -6,14 +6,17 @@ so the GPU forward and the obs decode hide behind sim time instead of
 serialising with it. Each env still sees exactly the same obs->action->step
 chain as a plain loop; only the wall-clock schedule changes.
 """
+import numpy as np
 
 
-def collect(env, policy, buf, obs_g, T):
+def collect(env, policy, vfn, buf, obs_g, T):
     """Fill buf[...][0:T] with T steps per env; returns finished-episode dicts.
 
     env    : VecEnv (uses env.groups, send_group, recv_group)
     policy : fn(obs_group, t, group_slice) -> (actions, logp, value), numpy arrays
-    buf    : dict of [T, N, ...] arrays: grid glob feats mask act logp val rew done
+    vfn    : fn(obs_batch) -> value, for terminal-obs bootstraps on truncation
+    buf    : dict of [T, N, ...] arrays: grid glob feats mask act logp val rew
+             done trunc tval
     obs_g  : list of per-group obs dicts; updated in place to the post-rollout obs
     A step is stored against the state it was taken FROM (s_t, a_t, r_t); the
     last step's reward/done/next-obs are drained after the loop, so nothing is
@@ -26,6 +29,15 @@ def collect(env, policy, buf, obs_g, T):
         obs_g[g], rews, dones, infos = env.recv_group(g)
         buf['rew'][t, sl] = rews
         buf['done'][t, sl] = dones
+        buf['trunc'][t, sl] = [bool(i.get('truncated')) for i in infos]
+        # capped episodes end mid-life, not mid-death — their last transition
+        # bootstraps the critic's V at the terminal obs (stashed by _finish
+        # before auto-reset replaced it), batched here per drain
+        tix = [i for i, inf in enumerate(infos) if 'term_obs' in inf]
+        if tix:
+            tobs = {k: np.stack([infos[i]['term_obs'][k] for i in tix])
+                    for k in ('grid', 'glob', 'feats', 'mask')}
+            buf['tval'][t, sl.start + np.asarray(tix)] = vfn(tobs)
         episodes.extend(i['episode'] for i in infos if 'episode' in i)
 
     for t in range(T):
